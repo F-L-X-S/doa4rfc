@@ -89,7 +89,59 @@ end
     CheckForExitCmd -- Triggers ---> Exit
 
 ```
+### Main App Data-flow
+The following diagram illustrates, how samples are streamed from the two SDR-instance, synchronized as sample-blocks with a unique timestamp based on the SDRs device-time and ho the CFRs fro detected frames are grouped and forwarded to the MUISC-algorithm. 
+```mermaid
+---
+config:
+  look: classic
+  layout: elk
+  theme: redux
+---
+flowchart TD
+Sdr1["SDR Channel 1"]
+Sdr2["SDR Channel 2"]
+subgraph HardwareInterface["SDR Hardware Interface"]
+        Rx1["RX  Channel 1"]
+        Rx2["RX  Channel 2"]
+end
 
+MultiSync["MultiSync"]
+Socket["Socket"]
+
+subgraph CbExport["Datasymbol Export"]
+    MatlabExportCb["Matlab Export"]
+end
+
+subgraph CfrExport["CFR Export"]
+    Grouping["Time-based Grouping"]
+    MatlabExportCfr["Matlab Export"]
+    ZmqExportCfr["Zmq Export"]
+end
+
+subgraph DoAAlgorithm["DoA Estimation"]
+    ZmqImportCfr["Zmq Import"]
+    MusicAlg["MUISC Algorithm"]
+end
+
+Sdr1 -- Sample-Stream ---> Rx1
+Sdr2 -- Sample-Stream ---> Rx2
+
+Sdr1 -- Timestamp ---> Rx1
+Sdr2 -- Timestamp ---> Rx2
+
+Rx1 -- Sample-Block & Timestamp ---> MultiSync
+Rx2 -- Sample-Block & Timestamp ---> MultiSync
+
+MultiSync -- Datasymbols & Timestamp ---> MatlabExportCb
+MultiSync -- CFR & Timestamp ---> Grouping
+Grouping -- CFR-Group & Timestamp ---> MatlabExportCfr
+Grouping -- CFR-Group ---> ZmqExportCfr
+ZmqExportCfr  -- CFR-Group ---> Socket
+Socket -- CFR-Groups [1..*] --->ZmqImportCfr
+ZmqImportCfr -- CFR-Groups [1..*] ---> MusicAlg
+
+```
 
 ### Hardware Setup 
 The software is tested using two USRP N210 with the WBXv3 daughterboard. Phase synchronization is achieved with the MIMO-cable. The USRPs are connected to the host by separate ethernet interfaces. For utilizing a different type of SDRs, the interfaces can be implemented in separated threads similar to `multi_rx.h`.  <br>
