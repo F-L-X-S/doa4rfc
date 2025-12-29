@@ -43,10 +43,10 @@
 #include <mutex>
 #include <condition_variable>
 
-#include <matlab_export/matlab_export.h>
-#include <multisync/multisync.h>
-#include <multi_rx/multi_rx.h>
-#include <zmq_socket/zmq_socket.h>
+#include <sdr_interfaces/sdr_interface_uhd.h>
+#include <sync_worker/sync_worker.h>
+#include <ui_worker/ui_worker.h>
+#include <export_worker/export_worker.h>
 
 #define NUM_CHANNELS 2                                          // Number of Channels (USRP-devices)   
 #define SYMBOLS_PER_FRAME 1                                     // Number of Symbols to send per frame 
