@@ -166,25 +166,7 @@ void stream_worker( std::array<uhd::usrp::multi_usrp::sptr, num_channels>& usrps
 void tx_worker(uhd::tx_streamer::sptr tx_stream,
                 std::vector<Sample_t>& buff,
                 unsigned int cycle_time,
-                std::atomic<bool>& stop_signal_called){
-
-    uhd::tx_metadata_t md;
-    std::vector<std::complex<float>*> buffs(1, &buff.front());
-    size_t samples_sent=0;
-    while (!stop_signal_called.load()) {
-        const size_t n_tx = tx_stream->send(buffs, buff.size(), md);
-        samples_sent+=n_tx;
-        md.start_of_burst = false;
-        md.has_time_spec  = false;
-
-        //sleep after transmitting buffer 
-        if (samples_sent>=buff.size()){
-            samples_sent = 0;
-            boost::this_thread::sleep(boost::posix_time::milliseconds(cycle_time));
-        };
-    }
-}
-
+                std::atomic<bool>& stop_signal_called);
 
 /**
  * @brief rx_worker reads the complex samples from the referenced uhd::rx\_streamer::sptr instance and 

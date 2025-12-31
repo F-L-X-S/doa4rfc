@@ -27,6 +27,8 @@
 #include <boost/thread.hpp>
 #include <iostream>
 
+#include <uhd/usrp/multi_usrp.hpp>   
+
 #include <multisync/multisync.h>
 
 // Typedefs

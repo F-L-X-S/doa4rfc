@@ -55,9 +55,17 @@ include_directories(${UHD_INCLUDE_DIRS})
 # ---------- internal libraries ----------------
 include_directories(include)
 
+# sdr_interfaces
+add_library(sdr_interface_uhd_lib include/sdr_interfaces/sdr_interface_uhd.cc)
+
+# export_worker
+add_library(export_worker_lib include/export_worker/export_worker.cc)
+
+# ui_worker
+add_library(ui_worker_lib include/ui_worker/ui_worker.cc)
+
 # signal_generator
 add_library(signal_generator_lib include/signal_generator/signal_generator.cc)
-target_link_libraries(signal_generator_lib liquid)
 
 # matlab_export
 add_library(matlab_export_lib include/matlab_export/matlab_export.cc)
@@ -78,6 +86,9 @@ add_executable(${PROJECT_NAME} ${MAIN_SRC_FILES})
 # link libraries to executable
 target_link_libraries(
   ${PROJECT_NAME} 
+    sdr_interface_uhd_lib
+    export_worker_lib
+    ui_worker_lib
     signal_generator_lib
     matlab_export_lib
     liquid
@@ -104,6 +115,9 @@ foreach(SOURCE_FILE ${SIMULATIONS_SRC_FILES})
 
   # Link libraries to the executable
   target_link_libraries(${EXECUTABLE_NAME}
+    sdr_interface_uhd_lib
+    export_worker_lib
+    ui_worker_lib
     signal_generator_lib
     matlab_export_lib
     liquid
