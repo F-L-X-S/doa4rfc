@@ -6,22 +6,24 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ---------- external packages ----------------
+include_directories(external)
+find_package(PkgConfig REQUIRED)
 include(FetchContent)
 
+# FFTW3
+pkg_check_modules(FFTW REQUIRED fftw3)
+include_directories(${FFTW_INCLUDE_DIRS})
+link_directories(${FFTW_LIBRARY_DIRS})
+
 # Liquid-DSP
-set(liquid_patch git apply ${CMAKE_CURRENT_SOURCE_DIR}/patch/liquid.patch)
+set(BUILD_EXAMPLES   OFF CACHE BOOL "" FORCE)
+set(BUILD_AUTOTESTS  OFF CACHE BOOL "" FORCE)
+set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(BUILD_SANDBOX    OFF CACHE BOOL "" FORCE)
+set(BUILD_DOC        OFF CACHE BOOL "" FORCE)
 
-FetchContent_Declare(
-  liquid
-  GIT_REPOSITORY https://github.com/jgaeddert/liquid-dsp
-  GIT_TAG        v1.7.0
-  PATCH_COMMAND ${liquid_patch}
-)
-
-FetchContent_MakeAvailable(liquid)
-include_directories(${liquid_SOURCE_DIR}/include)
-link_directories(${liquid_SOURCE_DIR}/lib)
-
+add_subdirectory(external/liquid-dsp)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external/liquid-dsp/include)
 
 # ZeroMQ
 # libzmq (remove for using local zmq installation)
@@ -57,15 +59,7 @@ include_directories(include)
 
 # sdr_interfaces
 add_library(sdr_interface_uhd_lib include/sdr_interfaces/sdr_interface_uhd.cc)
-
-# export_worker
-add_library(export_worker_lib include/export_worker/export_worker.cc)
-
-# ui_worker
-add_library(ui_worker_lib include/ui_worker/ui_worker.cc)
-
-# signal_generator
-add_library(signal_generator_lib include/signal_generator/signal_generator.cc)
+target_link_libraries(sdr_interface_uhd_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES})
 
 # matlab_export
 add_library(matlab_export_lib include/matlab_export/matlab_export.cc)
@@ -73,6 +67,18 @@ add_library(matlab_export_lib include/matlab_export/matlab_export.cc)
 # zmq_socket
 add_library(zmq_socket include/zmq_socket/zmq_socket.cc)
 target_link_libraries(zmq_socket cppzmq)
+
+# export_worker
+add_library(export_worker_lib include/export_worker/export_worker.cc)
+target_link_libraries(export_worker_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES} zmq_socket matlab_export_lib) 
+
+# ui_worker
+add_library(ui_worker_lib include/ui_worker/ui_worker.cc)
+target_link_libraries(ui_worker_lib ${Boost_LIBRARIES}) 
+
+# signal_generator
+add_library(signal_generator_lib include/signal_generator/signal_generator.cc)
+target_link_libraries(signal_generator_lib ${Boost_LIBRARIES} liquid) 
 
 # ---------- Main Application  ----------------
 # source files
