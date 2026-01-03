@@ -79,7 +79,7 @@ struct SyncTraits<ofdmframesync> {
     static ofdmframesync Create(const CreateParams& params, ofdmframesync_callback callback, void* userdata) 
     {
         return ofdmframesync_create(params.M, params.cp_len, params.taper_len, params.p, callback, userdata);
-    }
+    };
 
     /**
      * @brief Wrapper function to reset an OFDM frame synchronizer
@@ -89,7 +89,7 @@ struct SyncTraits<ofdmframesync> {
     static void Reset(ofdmframesync_s* fs) 
     {
         ofdmframesync_reset(fs);
-    }
+    };
 
     /**
      * @brief Wrapper function to execute an OFDM frame synchronizer
@@ -102,7 +102,7 @@ struct SyncTraits<ofdmframesync> {
     static int Execute(ofdmframesync_s* fs, std::complex<float>* x, unsigned int n) 
     {
         return ofdmframesync_execute(fs, x, n);
-    }
+    };
 
     /**
      * @brief Wrapper function to destroy an OFDM frame synchronizer
@@ -112,7 +112,7 @@ struct SyncTraits<ofdmframesync> {
     static void Destroy(ofdmframesync_s* fs) 
     {
         ofdmframesync_destroy(fs);
-    }
+    };
 
     /**
      * @brief Wrapper function to get CFR of the last frame received by the OFDM frame synchronizer
@@ -125,7 +125,7 @@ struct SyncTraits<ofdmframesync> {
         unsigned int fft_size = ofdmframesync_get_fft_size(fs);
         X->resize(fft_size);
         ofdmframesync_get_cfr(fs, X->data(), fft_size);
-    }
+    };
 };
 
 /**
