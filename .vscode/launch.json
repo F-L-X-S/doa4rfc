@@ -16,8 +16,8 @@
               "value": "$PATH:${command:cmake.launchTargetDirectory}"
           },
           {
-              "name": "OTHER_VALUE",
-              "value": "Something something"
+              "name": "CMAKE_PREFIX_PATH",
+              "value": "/opt/homebrew"
           }
       ],
       "externalConsole": true,
