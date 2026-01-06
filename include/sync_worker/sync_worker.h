@@ -86,6 +86,17 @@ struct PhaseQueue_t
 };
 
 /**
+ * @brief callback function to push received symbols from synchronizer to the cb-data-queue
+ * 
+ * @param _X array of received subcarrier samples [size: _M x 1]
+ * @param _p subcarrier allocation array [size: _M x 1]
+ * @param _M number of subcarriers
+ * @param _cb_data user-defined data pointer
+ * @return int 
+ */
+int callback(std::complex<float>* _X, unsigned char * _p, unsigned int _M, void * _cb_data);
+
+/**
  * @brief The sync_worker function continuously retrieves timestamped sample-blocks from the channel-specific queues and 
  * executes the synchronization algorithm on these samples through the MultiSync instance. 
  * When a frame is detected by a channel’s synchronizer, the resulting CFR and associated callback data are pushed into 

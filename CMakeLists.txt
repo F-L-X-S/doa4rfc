@@ -57,9 +57,13 @@ include_directories(${UHD_INCLUDE_DIRS})
 # ---------- internal libraries ----------------
 include_directories(include)
 
+# sync_worker
+add_library(sync_worker_lib include/sync_worker/sync_worker.cc)
+target_link_libraries(sync_worker_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES})
+
 # sdr_interfaces
 add_library(sdr_interface_uhd_lib include/sdr_interfaces/sdr_interface_uhd.cc)
-target_link_libraries(sdr_interface_uhd_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES})
+target_link_libraries(sdr_interface_uhd_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES} sync_worker_lib)
 
 # matlab_export
 add_library(matlab_export_lib include/matlab_export/matlab_export.cc)
@@ -70,11 +74,11 @@ target_link_libraries(zmq_socket cppzmq)
 
 # export_worker
 add_library(export_worker_lib include/export_worker/export_worker.cc)
-target_link_libraries(export_worker_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES} zmq_socket matlab_export_lib) 
+target_link_libraries(export_worker_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES} zmq_socket matlab_export_lib sync_worker_lib) 
 
 # ui_worker
 add_library(ui_worker_lib include/ui_worker/ui_worker.cc)
-target_link_libraries(ui_worker_lib ${Boost_LIBRARIES}) 
+target_link_libraries(ui_worker_lib ${Boost_LIBRARIES} sync_worker_lib) 
 
 # signal_generator
 add_library(signal_generator_lib include/signal_generator/signal_generator.cc)
@@ -92,6 +96,7 @@ add_executable(${PROJECT_NAME} ${MAIN_SRC_FILES})
 # link libraries to executable
 target_link_libraries(
   ${PROJECT_NAME} 
+    sync_worker_lib
     sdr_interface_uhd_lib
     export_worker_lib
     ui_worker_lib
@@ -121,6 +126,7 @@ foreach(SOURCE_FILE ${SIMULATIONS_SRC_FILES})
 
   # Link libraries to the executable
   target_link_libraries(${EXECUTABLE_NAME}
+    sync_worker_lib
     sdr_interface_uhd_lib
     export_worker_lib
     ui_worker_lib

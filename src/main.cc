@@ -66,23 +66,6 @@ void sig_int_handler(int) {
     stop_signal_called=true;
 }
 
-// callback function
-//  _X          : array of received subcarrier samples [size: _M x 1]
-//  _p          : subcarrier allocation array [size: _M x 1]
-//  _M          : number of subcarriers
-//  _userdata   : user-defined data pointer
-static int callback(std::complex<float>* _X, unsigned char * _p, unsigned int _M, void * _cb_data){
-    // Add symbols from all subcarriers to buffer 
-    for (unsigned int i = 0; i < _M; ++i) {
-        // ignore 'null' and 'pilot' subcarriers
-        if (_p[i] != OFDMFRAME_SCTYPE_DATA)
-            continue;
-        static_cast<CallbackData_t*>(_cb_data)->buffer.push_back(_X[i]);  
-    }
-    // Reset synchronizer after returning the first data symbol (return 1)
-    return 1;
-}
-
 // Main function 
 int UHD_SAFE_MAIN(int argc, char *argv[]) {
     uhd::set_thread_priority_safe();
