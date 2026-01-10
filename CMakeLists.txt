@@ -114,6 +114,7 @@ set(SIMULATIONS_SRC_FILES
   simulations/sim_singlechannel/sim_singlechannel.cc
   simulations/sim_multichannel/sim_multichannel.cc
   simulations/sim_music/sim_music.cc
+  simulations/sim_music_singlecarrier/sim_music_singlecarrier.cc
 )
 
 # Iterate over each file in SOURCE_FILES
