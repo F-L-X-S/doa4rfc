@@ -256,7 +256,7 @@ int main(int argc, char*argv[])
         userdata[i] = &cb_data[i];
 
     // Create multi frame synchronizer
-    MultiSync<ofdmframesync> ms(NUM_CHANNELS, {M, cp_len, taper_len, p}, callback, userdata);
+    MultiSync<ofdmframesync_iface> ms(NUM_CHANNELS, {M, cp_len, taper_len, p}, callback, userdata);
 
     // Channel frequency response (CFR) 
     std::vector<std::vector<Sample_t>> cfr(NUM_CHANNELS);                       // Multidimensional buffer to store the cfr for all channels

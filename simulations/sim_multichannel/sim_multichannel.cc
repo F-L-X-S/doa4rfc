@@ -223,7 +223,7 @@ int main(int argc, char*argv[])
         userdata[i] = &cb_data[i];
 
     // Create multi-channel frame synchronizer
-    MultiSync<ofdmframesync> ms(NUM_CHANNELS, {M, cp_len, taper_len, p}, callback, userdata);
+    MultiSync<ofdmframesync_iface> ms(NUM_CHANNELS, {M, cp_len, taper_len, p}, callback, userdata);
 
     // Samplewise synchronization of each channel (MultiSync processes whole buffer, in this case we want to limit the buffer to only one sample)
     std::vector<std::complex<float>> rx_sample(1);          // Buffer to hold current sample for sample-by-sample processing
