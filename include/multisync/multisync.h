@@ -30,103 +30,9 @@
 #include <complex>
 #include <cmath>
 #include <cassert>
+#include <concepts>
 #include <liquid.h>
-
-/**
- * @brief Abstract struct to define the Liquid-DSP interface for different synchronizer types
- * 
- * @tparam Synchronizer type
- */
-template<typename T>
-struct SyncTraits {
-    static_assert(sizeof(T) == 0, "Liquid-Functions not defined for this synchronizer type");
-};
-
-
-/**
- * @brief Define the functions (Create, Reset, Execute, Destroy, GetCfr) for the OFDM frame synchronizer
- * 
- * @tparam  Synchronizer type
- */
-template<>
-struct SyncTraits<ofdmframesync> {
-
-    /**
-     * @brief Define the type of the callback function used in the OFDM frame synchronizer
-     * 
-     */
-    using CallbackType = ofdmframesync_callback;
-
-    /**
-     * @brief Define the Parameters for the OFDM frame synchronizer Create function
-     * 
-     */
-    struct CreateParams {
-        unsigned int M;           // number of subcarriers
-        unsigned int cp_len;      // cyclic prefix length
-        unsigned int taper_len;   // taper length
-        unsigned char * p;        // modulation scheme
-    };
-
-    /**
-     * @brief Wrapper function to create an OFDM frame synchronizer
-     * 
-     * @param params Synchronizer parameters
-     * @param callback Callback function
-     * @param userdata User-defined data structure
-     * @return ofdmframesync_s* Pointer to the created synchronizer
-     */
-    static ofdmframesync Create(const CreateParams& params, ofdmframesync_callback callback, void* userdata) 
-    {
-        return ofdmframesync_create(params.M, params.cp_len, params.taper_len, params.p, callback, userdata);
-    };
-
-    /**
-     * @brief Wrapper function to reset an OFDM frame synchronizer
-     * 
-     * @param fs 
-     */
-    static void Reset(ofdmframesync_s* fs) 
-    {
-        ofdmframesync_reset(fs);
-    };
-
-    /**
-     * @brief Wrapper function to execute an OFDM frame synchronizer
-     * 
-     * @param fs Pointer to the synchronizer
-     * @param x Pointer to the input samples array
-     * @param n Number of input samples to read
-     * @return int Result of the execution
-     */
-    static int Execute(ofdmframesync_s* fs, std::complex<float>* x, unsigned int n) 
-    {
-        return ofdmframesync_execute(fs, x, n);
-    };
-
-    /**
-     * @brief Wrapper function to destroy an OFDM frame synchronizer
-     * 
-     * @param fs Pointer to the synchronizer
-     */
-    static void Destroy(ofdmframesync_s* fs) 
-    {
-        ofdmframesync_destroy(fs);
-    };
-
-    /**
-     * @brief Wrapper function to get CFR of the last frame received by the OFDM frame synchronizer
-     * 
-     * @param fs Pointer to the synchronizer
-     * @param X Vector to store the CFR (Channel Frequency Response) on
-     */
-    static void GetCfr(ofdmframesync_s* fs, std::vector<std::complex<float>>* X) 
-    {
-        unsigned int fft_size = ofdmframesync_get_fft_size(fs);
-        X->resize(fft_size);
-        ofdmframesync_get_cfr(fs, X->data(), fft_size);
-    };
-};
+#include <multisync/synctraits.h>
 
 /**
  * @brief Abstract MultiSync class to handle multiple instances of generic frame synchronizers. 
@@ -136,7 +42,7 @@ struct SyncTraits<ofdmframesync> {
  * 
  * @tparam synchronizer_type Liquid-DSP frame synchronizer type 
  */
-template<typename synchronizer_type>          
+template<SyncTraitsConcept synchronizer_interface>          
 class MultiSync {
 public:
 
@@ -144,13 +50,13 @@ public:
      * @brief Parameters to create an instance of the chosen synchronizer type
      * 
      */
-    using ParamsType   = typename SyncTraits<synchronizer_type>::CreateParams;
+    using ParamsType   = typename synchronizer_interface::CreateParams;
 
     /**
      * @brief Callback function type used by the chosen synchronizer type
      * 
      */
-    using CallbackType = typename SyncTraits<synchronizer_type>::CallbackType;
+    using CallbackType = typename synchronizer_interface::CallbackType;
 
 
     /**
@@ -162,20 +68,20 @@ public:
      * @param _userdata user-defined data structure array
      * @param _callback user-defined callback function
      */
-    MultiSync(unsigned int             num_channels,
+    MultiSync(unsigned int           num_channels,
             const ParamsType&        synchronizer_params, 
             CallbackType             callback,
             void **                  userdata):
             num_channels_(num_channels), userdata_(userdata), callback_(callback)
             {
                 // create synchronizer instances for all channels
-                framesync_ = new synchronizer_type[num_channels_];
+                framesync_ = new synchronizer_interface::SynchronizerType[num_channels_];
                 // create NCO instances for all channels
                 nco_ = new nco_crcf[num_channels_];
                 // initialize NCO and synchronizer instances 
                 for (unsigned int i=0; i<num_channels; i++) {
                     userdata_[i]  = userdata[i];
-                    framesync_[i] = SyncTraits<synchronizer_type>::Create(synchronizer_params, callback_, userdata_[i]);
+                    framesync_[i] = synchronizer_interface::Create(synchronizer_params, callback_, userdata_[i]);
                     nco_[i] = nco_crcf_create(LIQUID_VCO);
                 }
             }
@@ -188,7 +94,7 @@ public:
             {
                 // Call Liquid-DSP destroy functions
                 for (unsigned int i = 0; i < num_channels_; i++){
-                    SyncTraits<synchronizer_type>::Destroy(framesync_[i]);
+                    synchronizer_interface::Destroy(framesync_[i]);
                     nco_crcf_destroy(nco_[i]);
                 }
                 // Free allocated memory
@@ -203,7 +109,7 @@ public:
     void Reset()
             {
                 for (unsigned int i = 0; i < num_channels_; ++i) 
-                    SyncTraits<synchronizer_type>::Reset(framesync_[i]);
+                    synchronizer_interface::Reset(framesync_[i]);
             };
 
     /**
@@ -217,7 +123,7 @@ public:
                 std::vector<std::complex<float>>* x)
                 {   
                     nco_crcf_mix_block_up(nco_[channel_id],x->data(), x->data(),x->size());                 // Apply constant phase offset 
-                    SyncTraits<synchronizer_type>::Execute(framesync_[channel_id], x->data(), x->size());
+                    synchronizer_interface::Execute(framesync_[channel_id], x->data(), x->size());
                 };
 
     /**
@@ -252,7 +158,7 @@ public:
     void GetCfr(unsigned int                         channel_id, 
                 std::vector<std::complex<float>>*    X)
                 {
-                    SyncTraits<synchronizer_type>::GetCfr(framesync_[channel_id], X);
+                    synchronizer_interface::GetCfr(framesync_[channel_id], X);
                 };
 
 
@@ -264,10 +170,10 @@ private:
     unsigned int num_channels_;      
 
     /**
-     * @brief Pointer to first synchronizer instance in the array of synchronizer instances
+     * @brief Pointer to first synchronizer instance in the array of synchronizer instances for all channels
      * 
      */
-    synchronizer_type* framesync_; 
+    synchronizer_interface::SynchronizerType* framesync_; 
 
     /**
      * @brief Pointer to first NCO instance in the array of NCO instances
