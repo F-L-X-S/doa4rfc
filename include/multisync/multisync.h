@@ -8,7 +8,7 @@
  * 
  * The MultiSync class utilizes the abstract SyncTraits struct that defines the Liquid-DSP interface for 
  * the specified synchronizer type. SyncTraits defines the C-function call of the Liquid-DSP synchronizer 
- * corresponding to the C++ functions used in MultiSync (Create, Reset, Execute, Destroy, GetCfr).
+ * corresponding to the C++ functions used in MultiSync (Create, Reset, Execute, Destroy, GetFrameSamps).
  * 
  * Enabling MultiSync for different synchronizer types is achieved by specializing the SyncTraits struct for the required synchronizer type. 
  * 
@@ -150,15 +150,15 @@ public:
                 };
 
     /**
-     * @brief Get the Channel frequency response (CFR) of the specified channel
+     * @brief Get the samples of the last frame of the specified channel
      * 
      * @param channel_id Channel-ID
-     * @param X Vector to store the CFR (Channel Frequency Response) on
+     * @param X Vector to store the Samples on
      */
-    void GetCfr(unsigned int                         channel_id, 
+    void GetFrameSamps(unsigned int                         channel_id, 
                 std::vector<std::complex<float>>*    X)
                 {
-                    synchronizer_interface::GetCfr(framesync_[channel_id], X);
+                    synchronizer_interface::GetFrameSamps(framesync_[channel_id], X);
                 };
 
 

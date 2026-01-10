@@ -34,7 +34,7 @@
 #include <matlab_export/matlab_export.h>
 
 /**
- * @brief The cfr_export_worker first identifies queued CFRs whose timestamps all fall within a specified time range 
+ * @brief The cfr_export_worker first identifies queued CFRs in the frame-samps queue whose timestamps all fall within a specified time range 
  * and whose channel numbers are all unique within that group. 
  * Grouping minimizes the number of forwarded CFRs that correspond to frames not detected across all channels. 
  * Once a complete group is identified, the function exports the group simultaneously through the referenced ZmqSender and MatlabExport instances. 
@@ -44,47 +44,47 @@
  * This function is executed within a dedicated thread.
  * 
  * @tparam num_channels Number of Channels CFRs belong to
- * @param cfr_queue Reference to the thread-safe queue storing the detected CFRs
+ * @param frame_samps_queue Reference to the thread-safe queue storing the detected CFRs
  * @param max_age Time-range within which the timestamps of a CFRs corresponding to one frame must fall
  * @param sender Reference to the ZmqSender instance for exporting the CFR groups
  * @param m_file Reference to the MatlabExport instance for exporting the CFR groups
  * @param stop_signal_called Stop signal to terminate the thread
  */
 template <std::size_t num_channels>
-void cfr_export_worker( CfrQueue_t& cfr_queue, 
+void cfr_export_worker( FrameSampsQueue_t& frame_samps_queue, 
                     uhd::time_spec_t max_age,
                     ZmqSender& sender,
                     MatlabExport& m_file,
                     std::atomic<bool>& stop_signal_called) {
 
     // Queued CFRs of all channels and all times 
-    std::vector<Cfr_t> cfr_buffer;         
+    std::vector<FrameSamps_t> cfr_buffer;         
 
     // Sorted and time-matched CFRs of all channels
     std::vector<std::vector<std::complex<float>>> cfr_group(num_channels);
 
     while (!stop_signal_called.load()) {
         // Move cfr queue to buffer
-        std::unique_lock<std::mutex> lock_cfr(cfr_queue.mtx);
-        cfr_queue.cv.wait(lock_cfr, [&cfr_queue, &stop_signal_called] { 
-            return !cfr_queue.queue.empty() || stop_signal_called.load(); 
+        std::unique_lock<std::mutex> lock_cfr(frame_samps_queue.mtx);
+        frame_samps_queue.cv.wait(lock_cfr, [&frame_samps_queue, &stop_signal_called] { 
+            return !frame_samps_queue.queue.empty() || stop_signal_called.load(); 
         });
 
-        if (!cfr_queue.queue.empty()) {
-            cfr_buffer.push_back(std::move(cfr_queue.queue.front()));
-            cfr_queue.queue.pop();
+        if (!frame_samps_queue.queue.empty()) {
+            cfr_buffer.push_back(std::move(frame_samps_queue.queue.front()));
+            frame_samps_queue.queue.pop();
         }
 
         // Sort CFRs by timestamp
         std::sort(cfr_buffer.begin(), cfr_buffer.end(),
-            [](const Cfr_t& a, const Cfr_t& b) {
+            [](const FrameSamps_t& a, const FrameSamps_t& b) {
                 return a.timestamp < b.timestamp;
             });
 
         // Find a group of CFRs from all channels within the max_age window
         unsigned int i, j;
         for (i = 0; i < cfr_buffer.size(); ++i) {
-            std::vector<const Cfr_t*> group(num_channels, nullptr); // Group of CFRs from each channel
+            std::vector<const FrameSamps_t*> group(num_channels, nullptr); // Group of CFRs from each channel
             const auto& base = cfr_buffer[i];                       // Add initial CFR to group
             group[base.channel] = &base;
 
@@ -110,7 +110,7 @@ void cfr_export_worker( CfrQueue_t& cfr_queue,
                 cfr_group = std::vector<std::vector<std::complex<float>>>(num_channels);
                 // Prepare CFRs sorted by channel
                 for (const auto& cfr : group) {
-                    cfr_group[cfr->channel] = cfr->cfr;;
+                    cfr_group[cfr->channel] = cfr->frame_samps;;
                 }
 
                 // ZMQ Export
@@ -121,7 +121,7 @@ void cfr_export_worker( CfrQueue_t& cfr_queue,
                 for (const auto& cfr : group) {
                     std::string timestamp = std::to_string(cfr->timestamp.get_full_secs())+std::to_string(cfr->timestamp.get_tick_count(1000));
                     std::cout << "CH"<<cfr->channel<<": "<<timestamp << " ";
-                    m_file.Add(cfr->cfr, "CH" + std::to_string(cfr->channel) +"_"+timestamp);
+                    m_file.Add(cfr->frame_samps, "CH" + std::to_string(cfr->channel) +"_"+timestamp);
                 }
                 std::cout <<"!"<< std::endl;
 

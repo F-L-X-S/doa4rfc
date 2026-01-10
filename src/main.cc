@@ -202,7 +202,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
 
     // ---------------------- Configure Export workers ----------------------
     // Thread-safe queues 
-    CfrQueue_t cfr_queue;
+    FrameSampsQueue_t cfr_queue;
     CbDataQueue_t cbdata_queue;
     PhaseQueue_t phi_error_queue;
 

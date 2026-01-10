@@ -36,7 +36,7 @@ using Sample_t = std::complex<float>;   // Received samples type
 
 struct RxSampleBlock_t
 {
-    std::vector<Sample_t> samples;                    // Received samples
+    std::vector<Sample_t> samples;                      // Received samples
     uhd::time_spec_t timestamp;                         // Timestamp of the sample block
 };
 
@@ -47,15 +47,15 @@ struct RxSamplesQueue_t
     std::condition_variable cv;
 };
 
-struct Cfr_t {
-    std::vector<std::complex<float>> cfr;               // Channel Frequency Response
-    uhd::time_spec_t  timestamp;                        // Timestamp of the CFR
+struct FrameSamps_t {
+    std::vector<std::complex<float>> frame_samps;       // Baseband-Samples of the Frame 
+    uhd::time_spec_t  timestamp;                        // Timestamp of the Frame 
     unsigned int channel;                               // Channel index
 };
 
-struct CfrQueue_t
+struct FrameSampsQueue_t
 {
-    std::queue<Cfr_t> queue;
+    std::queue<FrameSamps_t> queue;
     std::mutex mtx;
     std::condition_variable cv;
 };
@@ -99,7 +99,7 @@ int callback(std::complex<float>* _X, unsigned char * _p, unsigned int _M, void 
 /**
  * @brief The sync_worker function continuously retrieves timestamped sample-blocks from the channel-specific queues and 
  * executes the synchronization algorithm on these samples through the MultiSync instance. 
- * When a frame is detected by a channel’s synchronizer, the resulting CFR and associated callback data are pushed into 
+ * When a frame is detected by a channel’s synchronizer, the resulting sample-block and associated callback data are pushed into 
  * thread-safe queues for use in subsequent processing stages. 
  * The queued data is tagged with the timestamp and the channel number of the synchronized sample-block, in which the frame was detected.
  * 
@@ -114,7 +114,7 @@ int callback(std::complex<float>* _X, unsigned char * _p, unsigned int _M, void 
  * @param ms Reference to the MultiSync instance
  * @param cb_data Reference to the array of callback-data structures (one for each channel)
  * @param rx_queues Reference to the array of thread-safe queues storing received sample blocks (one for each channel)
- * @param cfr_queue Reference to the thread-safe queue to push the detected CFRs
+ * @param frame_samps_queue Reference to the thread-safe queue to push the detected frame samples
  * @param cbdata_queue Reference to the thread-safe queue to push the Callback-data
  * @param phi_error_queue Reference to the thread-safe queue to receive phase corrections for the NCOs
  * @param stop_signal_called Stop signal to terminate the thread
@@ -123,7 +123,7 @@ template <std::size_t num_channels, typename syncronizer_type, typename cb_data_
 void sync_worker(   syncronizer_type& ms,
                     std::array<CallbackData_t, num_channels>& cb_data,
                     std::array<RxSamplesQueue_t, num_channels>& rx_queues,
-                    CfrQueue_t& cfr_queue,
+                    FrameSampsQueue_t& frame_samps_queue,
                     CbDataQueue_t& cbdata_queue,
                     PhaseQueue_t& phi_error_queue,
                     std::atomic<bool>& stop_signal_called
@@ -131,7 +131,7 @@ void sync_worker(   syncronizer_type& ms,
 
     std::vector<RxSampleBlock_t> sample_blocks;
     std::vector<std::complex<float>> rx_sample(1);
-    Cfr_t cfr;                                                        
+    FrameSamps_t frame_samps;                                                        
     unsigned int i, j, num_written;
 
     while (!stop_signal_called.load()) {
@@ -178,15 +178,15 @@ void sync_worker(   syncronizer_type& ms,
                                 
                             // Check, if callback-data was updated by synchronizer
                             if (cb_data[i].buffer.size()){     
-                                // Push CFR to queue                    
-                                ms.GetCfr(i, &cfr.cfr);                                                 // Write cfr to callback data
-                                cfr.timestamp = sample_blocks[j].timestamp;                             // Update timestamp
-                                cfr.channel = i;                                                        // Set channel index
+                                // Push Frame-Samples to queue                    
+                                ms.GetFrameSamps(i, &frame_samps.frame_samps);                          // Write frame-samples to callback data
+                                frame_samps.timestamp = sample_blocks[j].timestamp;                             // Update timestamp
+                                frame_samps.channel = i;                                                        // Set channel index
                                 {
-                                    std::lock_guard<std::mutex> lock_cfr(cfr_queue.mtx);
-                                    cfr_queue.queue.push(std::move(cfr));
+                                    std::lock_guard<std::mutex> lock_frame_samps(frame_samps_queue.mtx);
+                                    frame_samps_queue.queue.push(std::move(frame_samps));
                                 }
-                                cfr_queue.cv.notify_one();
+                                frame_samps_queue.cv.notify_one();
 
                                 // Push Callback-data to queue
                                 cb_data[i].timestamp = sample_blocks[j].timestamp;                      // Update timestamp
@@ -198,7 +198,7 @@ void sync_worker(   syncronizer_type& ms,
                                 cbdata_queue.cv.notify_one();
 
                                 // Print debug info 
-                                std::cout << "Captured CFR for channel "<< i <<" at timestamp "<< cfr.timestamp.get_full_secs() << std::endl;
+                                std::cout << "Captured Frame for channel "<< i <<" at timestamp "<< frame_samps.timestamp.get_full_secs() << std::endl;
                             };
                         };
                     };
