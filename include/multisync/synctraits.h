@@ -253,8 +253,8 @@ struct SyncTraits<flexframesync> {
      */
     static void GetFrameSamps(SynchronizerType fs, std::vector<std::complex<float>>* X) 
     {
-        // X->resize(fft_size);
-        // flexframesync_get_frame_samps(fs, X->data(), fft_size); // Currently not implemented for flexframesync (t.b.d.) !!!
+        X->resize(64);                                           // fixed size for flexframesync
+        flexframesync_get_frame_samps(fs, X->data(), X->size()); 
     };
 };
 
