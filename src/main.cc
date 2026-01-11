@@ -174,6 +174,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
         double(750) ,std::ref(stop_signal_called));
     std::this_thread::sleep_for(std::chrono::milliseconds(3*tx_cycle));
 
+    // ---------------------- Configure Synchronization worker ----------------------
+    SyncWorker<2, ofdmframesync_iface> sync({M, cp_len, taper_len, p}, std::ref(stop_signal_called));
+
     // ---------------------- Configure Receive workers ----------------------
     // TX stream configuration 
     uhd::tx_streamer::sptr tx_stream_0 = usrps[0]->get_tx_stream(stream_args); 
@@ -183,34 +186,22 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     double rx_resamp_rate = txrx_rate / usrp_rx_rate;
     std::cout << boost::format("Required RX Resampling Rate: %f ") % (rx_resamp_rate) << std::endl;
 
-    // callback data
-    std::array<CallbackData_t, NUM_CHANNELS> cb_data;
-    void* userdata[NUM_CHANNELS];
-
-    // Array of Pointers to CB-Data 
-    for (unsigned int i = 0; i < NUM_CHANNELS; ++i)
-        userdata[i] = &cb_data[i];
-        
-    // Create multi frame synchronizer
-    Sync_t ms(NUM_CHANNELS, {M, cp_len, taper_len, p}, callback, userdata);
-
     // Thread-safe queues 
-    std::array<RxSamplesQueue_t, 2> rx_queues;
+    std::array<RxSamplesQueue_t, 2>& rx_queues = *sync.GetRxQueues();
 
     std::thread t1(rx_worker<4096>, rx_stream_0, std::ref(rx_queues[0]), std::ref(stop_signal_called));
     std::thread t2(rx_worker<4096>, rx_stream_1, std::ref(rx_queues[1]), std::ref(stop_signal_called));
 
+    // ---------------------- Run Sync workers ----------------------
+    sync.RunSyncWorker();
+
     // ---------------------- Configure Export workers ----------------------
-    // Thread-safe queues 
+    // Add output-queues to sync-worker 
     FrameSampsQueue_t cfr_queue;
     CbDataQueue_t cbdata_queue;
-    PhaseQueue_t phi_error_queue;
+    sync.AddFrameSampsQueue(std::ref(cfr_queue));
+    sync.AddCbDataQueue(std::ref(cbdata_queue));
 
-    std::thread t3(sync_worker<NUM_CHANNELS, Sync_t, CallbackData_t>, std::ref(ms), 
-        std::ref(cb_data), std::ref(rx_queues), 
-        std::ref(cfr_queue), std::ref(cbdata_queue),
-        std::ref(phi_error_queue), std::ref(stop_signal_called));
-    
     std::thread t4(cfr_export_worker<NUM_CHANNELS>, std::ref(cfr_queue), 
         max_age, std::ref(sender), std::ref(m_file_cfr), std::ref(stop_signal_called));
     
@@ -227,6 +218,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     std::thread t6(tx_worker, std::ref(tx_stream_0), std::ref(tx_base), tx_cycle, std::ref(stop_signal_called));
 
     // ---------------------- Configure Terminal workers ----------------------
+    PhaseQueue_t& phi_error_queue = *sync.GetPhaseCorrQueue();   // Get input-queue for channel phase-offset correction 
     std::thread t7(terminal_worker, std::ref(phi_error_queue), std::ref(stop_signal_called));
 
     // ---------------------- Continue in main thread ----------------------
@@ -234,15 +226,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
 
-    rx_queues[0].cv.notify_all();
-    rx_queues[1].cv.notify_all();
-    cfr_queue.cv.notify_all();
-    cbdata_queue.cv.notify_all();
+    sync.StopSyncWorker();
 
     t0.join();
     t1.join();
     t2.join();
-    t3.join();
     t4.join();
     t5.join();
     t6.join();
