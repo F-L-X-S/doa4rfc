@@ -57,8 +57,6 @@
 #define MUSIC_PYFILE "./music/music-spectrum.py"                // Python script with MUSIC algorithm for DoA estimation
 #define EXPORT_INTERFACE 'tcp://localhost:5555'                 // Interface for zmq socket
 
-// Use OFDM-frame synchronizer for multi-channel synchronization
-using Sync_t = MultiSync<ofdmframesync_iface>;
 
 // Signal handler to stop by keaboard interrupt
 std::atomic<bool> stop_signal_called(false);
