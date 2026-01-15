@@ -191,7 +191,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     std::thread t2(rx_worker<4096>, rx_stream_1, std::ref(rx_queues[1]), std::ref(stop_signal_called));
 
     // ---------------------- Run Sync workers ----------------------
-    sync.RunSyncWorker();
+    sync.RunWorker();
 
     // ---------------------- Configure Export workers ----------------------
     // Add output-queues to sync-worker 
@@ -224,7 +224,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
 
-    sync.StopSyncWorker();
+    sync.StopWorker();
 
     t0.join();
     t1.join();

@@ -29,6 +29,7 @@
 
 #include <uhd/usrp/multi_usrp.hpp>   
 
+#include <multithread_worker/multithread_worker.h>
 #include <multisync/multisync.h>
 
 // Typedefs
@@ -39,51 +40,27 @@ struct RxSampleBlock_t
     std::vector<Sample_t> samples;                      // Received samples
     uhd::time_spec_t timestamp;                         // Timestamp of the sample block
 };
-
-struct RxSamplesQueue_t
-{
-    std::queue<RxSampleBlock_t> queue;
-    std::mutex mtx;
-    std::condition_variable cv;
-};
+using RxSamplesQueue_t = ThreadSafeQueue<RxSampleBlock_t>;
 
 struct FrameSamps_t {
     std::vector<std::complex<float>> frame_samps;       // Baseband-Samples of the Frame 
     uhd::time_spec_t  timestamp;                        // Timestamp of the Frame 
     unsigned int channel;                               // Channel index
 };
-
-struct FrameSampsQueue_t
-{
-    std::queue<FrameSamps_t> queue;
-    std::mutex mtx;
-    std::condition_variable cv;
-};
+using FrameSampsQueue_t = ThreadSafeQueue<FrameSamps_t>;
 
 struct CallbackData_t {
     std::vector<std::complex<float>> buffer;            // Buffer to store detected symbols 
     uhd::time_spec_t  timestamp;                        // Timestamp 
     unsigned int channel;                               // Channel index
 };
-
-struct CbDataQueue_t
-{
-    std::queue<CallbackData_t> queue;
-    std::mutex mtx;
-    std::condition_variable cv;
-};
+using CbDataQueue_t = ThreadSafeQueue<CallbackData_t>;
 
 struct Phase_t {
     float phi;               // Phase data
     unsigned int channel;    // Channel index
 };
-
-struct PhaseQueue_t
-{
-    std::queue<Phase_t> queue;
-    std::mutex mtx;
-    std::condition_variable cv;
-};
+using PhaseQueue_t = ThreadSafeQueue<Phase_t>;
 
 /**
  * @brief callback function to push received symbols from synchronizer to the cb-data-queue
@@ -106,33 +83,33 @@ int callback(std::complex<float>* _X, unsigned char * _p, unsigned int _M, void 
  * Throughout the synchronization process, phase corrections can be applied to the NCOs of the MultiSync instance to compensate 
  * the phase errors introduced by the hardware instances.
  * 
- * This function is executed within a dedicated thread.
+ * This function is executed within a dedicated thread using MultithreadWorker.
  * 
  * @tparam num_channels Number of Channels to synchronize
  * @tparam synchronizer_iface Type of the synchronizer interface to use (e.g. ofdmframesync_iface)
- * @param stop_signal_called Stop signal to terminate the thread
+ * @param stop_signal_ref Stop signal to terminate the thread
  */
 template <std::size_t num_channels, typename synchronizer_iface>
-class SyncWorker {
+class SyncWorker: public MultithreadWorker {
     public:
         using MsParams = MultiSync<synchronizer_iface>::ParamsType;
 
         SyncWorker(const MsParams&   synchronizer_params,
                     std::atomic<bool>&          stop_signal_ref):
-                        stop_signal_called(&stop_signal_ref),
+                        MultithreadWorker(stop_signal_ref),
                         ms(num_channels, synchronizer_params, callback, userdata) {
                             frame_samps_queue = nullptr;
                             cbdata_queue = nullptr;
-                            sync_thread_ = nullptr;
+                            AddWorkerQueue<PhaseQueue_t>(&phi_corr_queue);
 
                             // Initialize Array of Pointers to CB-Data 
-                            for (unsigned int i = 0; i < num_channels; ++i)
+                            for (unsigned int i = 0; i < num_channels; ++i){
                                 userdata[i] = &cb_data[i];
+                                AddWorkerQueue<RxSamplesQueue_t>(&rx_queues[i]);
+                            };
         };
 
-        ~SyncWorker(){
-            StopSyncWorker();
-        };
+        ~SyncWorker(){};
 
         /**
          * @brief Add queue to retrieve sample-blocks belonging to detected frames (Sync-Worker output)
@@ -142,6 +119,7 @@ class SyncWorker {
          */
         void AddFrameSampsQueue(FrameSampsQueue_t& queue) {
             frame_samps_queue = &queue;
+            AddWorkerQueue<FrameSampsQueue_t>(frame_samps_queue);
         };
 
         /**
@@ -151,6 +129,7 @@ class SyncWorker {
          */
         void AddCbDataQueue(CbDataQueue_t& queue) {
             cbdata_queue = &queue;
+            AddWorkerQueue<CbDataQueue_t>(cbdata_queue);
         };
 
         /**
@@ -195,7 +174,7 @@ class SyncWorker {
          * 
          * @param stop_signal_called Stop signal to terminate the thread
          */
-        void Execute() {
+        void Execute() override final {
             std::vector<RxSampleBlock_t> rx_blocks;             // Block of samples retrieved from a channels rx-queue
             std::vector<std::complex<float>> rx_sample(1);      // sample from rx-block to be processed 
             FrameSamps_t frame_samps;                           // Block of samples belonging to a detected frame                         
@@ -275,40 +254,6 @@ class SyncWorker {
             } // while 
         };
 
-        /**
-         * @brief Run Multi-channel synchronization within a separated thread
-         * 
-         */
-        void RunSyncWorker() {
-            if(!sync_thread_) sync_thread_ = new std::thread(&SyncWorker::Execute, this);
-        }
-
-        /**
-         * @brief Stop thread executing multi-channel synchronization
-         * 
-         */
-        void StopSyncWorker() {
-            // Set stop signal 
-            stop_signal_called->store(true);
-
-            // Wait...
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-
-            // Notify connected queues
-            for (unsigned int i = 0; i < num_channels; ++i){
-                rx_queues[0].cv.notify_all();
-            };
-            phi_corr_queue.cv.notify_all();
-            if (cbdata_queue) cbdata_queue->cv.notify_all();
-            if (frame_samps_queue) frame_samps_queue->cv.notify_all();
-
-            // Kill thread
-            if (sync_thread_){
-                sync_thread_->join();
-                delete sync_thread_;  
-            };          
-        }
-
     private:
         /**
          * @brief Internal MultiSync instance
@@ -351,18 +296,6 @@ class SyncWorker {
          * 
          */
         CbDataQueue_t* cbdata_queue;
-
-        /**
-         * @brief Reference to sync-worker thread
-         * 
-         */
-        std::thread* sync_thread_;
-
-        /**
-         * @brief External stop signal to terminate the threads
-         * 
-         */
-        std::atomic<bool>* stop_signal_called;
 
 };
 

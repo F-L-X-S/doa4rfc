@@ -57,9 +57,13 @@ include_directories(${UHD_INCLUDE_DIRS})
 # ---------- internal libraries ----------------
 include_directories(include)
 
+# multithread_worker
+add_library(multithread_worker_lib include/multithread_worker/multithread_worker.cc)
+target_link_libraries(multithread_worker_lib ${Boost_LIBRARIES})
+
 # sync_worker
 add_library(sync_worker_lib include/sync_worker/sync_worker.cc)
-target_link_libraries(sync_worker_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES})
+target_link_libraries(sync_worker_lib multithread_worker_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES})
 
 # sdr_interfaces
 add_library(sdr_interface_uhd_lib include/sdr_interfaces/sdr_interface_uhd.cc)
