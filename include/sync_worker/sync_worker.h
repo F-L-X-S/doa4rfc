@@ -27,51 +27,121 @@
 #include <boost/thread.hpp>
 #include <iostream>
 
-#include <uhd/usrp/multi_usrp.hpp>   
-
 #include <multithread_worker/multithread_worker.h>
 #include <multisync/multisync.h>
 
-// Typedefs
-using Sample_t = std::complex<float>;   // Received samples type
+/**
+ * @brief Single Sample Type
+ * 
+ */
+using Sample_t = std::complex<float>;                   // Received samples type
 
-struct RxSampleBlock_t
+/**
+ * @brief Detected Symbol type
+ * 
+ */
+using Symbol_t = std::complex<float>;                   // Detected Symbol type
+
+/**
+ * @brief Block of samples with timestamp
+ * 
+ */
+struct SampleBlock_t
 {
     std::vector<Sample_t> samples;                      // Received samples
-    uhd::time_spec_t timestamp;                         // Timestamp of the sample block
+    uint64_t timestamp;                                 // Global Nano-Second-Timestamp
 };
-using RxSamplesQueue_t = ThreadSafeQueue<RxSampleBlock_t>;
 
-struct FrameSamps_t {
-    std::vector<std::complex<float>> frame_samps;       // Baseband-Samples of the Frame 
-    uhd::time_spec_t  timestamp;                        // Timestamp of the Frame 
+/**
+ * @brief Thread-Safe Queue structure for sample blocks
+ * 
+ */
+using SampleBlockQueue_t = ThreadSafeQueue<SampleBlock_t>;
+
+/**
+ * @brief Block of symbols with timestamp
+ * 
+ */
+struct SymbolBlock_t
+{
+    std::vector<Symbol_t> symbols;                      // Received symbols
+    uint64_t timestamp;                                 // Global Nano-Second-Timestamp
+};
+
+/**
+ * @brief Thread-Safe Queue structure for symbol blocks
+ * 
+ */
+using SymbolBlockQueue_t = ThreadSafeQueue<SymbolBlock_t>;
+
+
+
+/**
+ * @brief Sample-Block belonging to one frame 
+ * 
+ */
+struct FrameSamps_t: public SampleBlock_t {
     unsigned int channel;                               // Channel index
 };
+
+/**
+ * @brief Thread-Safe Queue structure for Frame Samples
+ * 
+ */
 using FrameSampsQueue_t = ThreadSafeQueue<FrameSamps_t>;
 
-struct CallbackData_t {
-    std::vector<std::complex<float>> buffer;            // Buffer to store detected symbols 
-    uhd::time_spec_t  timestamp;                        // Timestamp 
+/**
+ * @brief Symbol-Block belonging to one frame 
+ * 
+ */
+struct FrameSyms_t: public SymbolBlock_t {
     unsigned int channel;                               // Channel index
 };
-using CbDataQueue_t = ThreadSafeQueue<CallbackData_t>;
 
+/**
+ * @brief Thread-Safe Queue structure for Frame Symbols
+ * 
+ */
+using FrameSymsQueue_t = ThreadSafeQueue<FrameSyms_t>;
+
+/**
+ * @brief Samples of all channels belonging to one frame 
+ * 
+ */
+using  MultiChFrameSamps_t = std::vector<std::vector<Sample_t>>;
+
+/**
+ * @brief Thread-Safe Queue structure for Frame Samples
+ * 
+ */
+using MultiChFrameSampsQueue_t = ThreadSafeQueue<MultiChFrameSamps_t>;
+
+/**
+ * @brief Symbols of all channels belonging to one frame 
+ * 
+ */
+using MultiChFrameSyms_t = std::vector<std::vector<Symbol_t>>;         
+
+/**
+ * @brief Thread-Safe Queue structure for Frame Symbols
+ * 
+ */
+using MultiChFrameSymsQueue_t = ThreadSafeQueue<MultiChFrameSyms_t>;
+
+/**
+ * @brief Phase correction structure to store phase adjustments for NCOs
+ * 
+ */
 struct Phase_t {
     float phi;               // Phase data
     unsigned int channel;    // Channel index
 };
-using PhaseQueue_t = ThreadSafeQueue<Phase_t>;
 
 /**
- * @brief callback function to push received symbols from synchronizer to the cb-data-queue
+ * @brief Thread-Safe Queue structure for Phase correction values 
  * 
- * @param _X array of received subcarrier samples [size: _M x 1]
- * @param _p subcarrier allocation array [size: _M x 1]
- * @param _M number of subcarriers
- * @param _cb_data user-defined data pointer
- * @return int 
  */
-int callback(std::complex<float>* _X, unsigned char * _p, unsigned int _M, void * _cb_data);
+using PhaseQueue_t = ThreadSafeQueue<Phase_t>;
 
 /**
  * @brief The SyncWorker function continuously retrieves timestamped sample-blocks from the channel-specific queues and 
@@ -93,19 +163,19 @@ template <std::size_t num_channels, typename synchronizer_iface>
 class SyncWorker: public MultithreadWorker {
     public:
         using MsParams = MultiSync<synchronizer_iface>::ParamsType;
+        using Callback_t = MultiSync<synchronizer_iface>::CallbackType;
 
         SyncWorker(const MsParams&   synchronizer_params,
                     std::atomic<bool>&          stop_signal_ref):
                         MultithreadWorker(stop_signal_ref),
-                        ms(num_channels, synchronizer_params, callback, userdata) {
-                            frame_samps_queue = nullptr;
-                            cbdata_queue = nullptr;
-                            AddWorkerQueue<PhaseQueue_t>(&phi_corr_queue);
+                        ms_(num_channels, synchronizer_params, reinterpret_cast<Callback_t>(callback), &userdata_) {
+                            frame_samps_queue_ = nullptr;
+                            frame_syms_queue_ = nullptr; 
+                            cb_data_.ms_ptr = &ms_; 
+                            AddWorkerQueue<PhaseQueue_t>(&phi_corr_queue_);         // Add Phase-Corr Queue to Worker
 
-                            // Initialize Array of Pointers to CB-Data 
                             for (unsigned int i = 0; i < num_channels; ++i){
-                                userdata[i] = &cb_data[i];
-                                AddWorkerQueue<RxSamplesQueue_t>(&rx_queues[i]);
+                                AddWorkerQueue<SampleBlockQueue_t>(&rx_queues_[i]);
                             };
         };
 
@@ -118,36 +188,37 @@ class SyncWorker: public MultithreadWorker {
          * @return * void 
          */
         void AddFrameSampsQueue(FrameSampsQueue_t& queue) {
-            frame_samps_queue = &queue;
-            AddWorkerQueue<FrameSampsQueue_t>(frame_samps_queue);
+            frame_samps_queue_ = &queue;
+            AddWorkerQueue<FrameSampsQueue_t>(frame_samps_queue_);
         };
 
         /**
-         * @brief Add queue to retrieve callback-data belonging to detected frames (Sync-Worker output)
+         * @brief Add queue to retrieve symbol-blocks belonging to detected frames (Sync-Worker output)
          * 
-         * @param queue Queue to retrieve callback-data belonging to detected frames
+         * @param queue Queue to retrieve symbol-blocks belonging to detected frames
+         * @return * void 
          */
-        void AddCbDataQueue(CbDataQueue_t& queue) {
-            cbdata_queue = &queue;
-            AddWorkerQueue<CbDataQueue_t>(cbdata_queue);
+        void AddFrameSymsQueue(FrameSymsQueue_t& queue) {
+            frame_syms_queue_ = &queue;
+            AddWorkerQueue<FrameSymsQueue_t>(frame_syms_queue_);
         };
 
         /**
          * @brief Get the reference to the internal rx-sample queues (one for each channel)
          * 
-         * @return std::array<RxSamplesQueue_t, num_channels>* Reference to an array of rx-sample queues 
+         * @return std::array<SampleBlockQueue_t, num_channels>* Reference to an array of rx-sample queues 
          */
-        std::array<RxSamplesQueue_t, num_channels>* GetRxQueues() {
-            return &rx_queues;
+        std::array<SampleBlockQueue_t, num_channels>* GetRxQueues() {
+            return &rx_queues_;
         };
 
         /**
          * @brief Get the reference to a internal rx-sample queue for a specific channel
          * 
-         * @return RxSamplesQueue_t*  Reference to channel-specific rx-sample queue
+         * @return SampleBlockQueue_t*  Reference to channel-specific rx-sample queue
          */
-        RxSamplesQueue_t* GetRxQueue(int channel) {
-            return &rx_queues[channel];
+        SampleBlockQueue_t* GetRxQueue(int channel) {
+            return &rx_queues_[channel];
         };
 
         /**
@@ -157,7 +228,7 @@ class SyncWorker: public MultithreadWorker {
          * @return PhaseQueue_t& reference to internal Phase-Corr Queue 
          */
         PhaseQueue_t* GetPhaseCorrQueue() {
-            return &phi_corr_queue;
+            return &phi_corr_queue_;
         };
 
         /**
@@ -175,127 +246,174 @@ class SyncWorker: public MultithreadWorker {
          * @param stop_signal_called Stop signal to terminate the thread
          */
         void Execute() override final {
-            std::vector<RxSampleBlock_t> rx_blocks;             // Block of samples retrieved from a channels rx-queue
-            std::vector<std::complex<float>> rx_sample(1);      // sample from rx-block to be processed 
-            FrameSamps_t frame_samps;                           // Block of samples belonging to a detected frame                         
+            std::vector<SampleBlock_t> rx_blocks;               // Blocks of samples retrieved from a channels rx-queue                   
             unsigned int i, j, num_written;
 
             while (!stop_signal_called->load()) {
-                // Process Phase Error queue to adjust NCO phase for the channel
-                std::unique_lock<std::mutex> lock_phi(phi_corr_queue.mtx);
-                phi_corr_queue.cv.wait_for(lock_phi, std::chrono::milliseconds(100), [&]() {
-                    return !phi_corr_queue.queue.empty() || stop_signal_called->load();
-                });
 
-                while (!phi_corr_queue.queue.empty()) {
-                    Phase_t phi_error = std::move(phi_corr_queue.queue.front());
-                    std::cout<< "Adjusted NCO of CH"<< phi_error.channel<<" from"<< ms.GetNcoPhase(phi_error.channel)<<" rad";
-                    ms.AdjustNcoPhase(phi_error.channel, phi_error.phi);  // Adjust NCO phase for the channel
-                    std::cout<< "to "<< ms.GetNcoPhase(phi_error.channel)<<" rad!"<<std::endl;
-                    phi_corr_queue.queue.pop();
-                }
-                lock_phi.unlock();
+                // Process Phase Correction to adjust NCO phase for the channel
+                Phase_t phi_corr;
+                if (PopItemFromQueue<Phase_t>(phi_corr_queue_, phi_corr)){
+                    std::cout<< "Adjusted NCO of CH"<< phi_corr.channel<<" from"<< ms_.GetNcoPhase(phi_corr.channel)<<" rad";
+                    ms_.AdjustNcoPhase(phi_corr.channel, phi_corr.phi);  // Adjust NCO phase for the channel
+                    std::cout<< "to "<< ms_.GetNcoPhase(phi_corr.channel)<<" rad!"<<std::endl;
+                };
 
                 // Process channels
                 for (i = 0; i < num_channels; ++i) {
                         // Clear samples and Callback-data
                         rx_blocks.clear();
-                        cb_data[i].buffer.clear();  
 
                         // Process channel queue 
-                        std::unique_lock<std::mutex> lock_rx(rx_queues[i].mtx);
-                        rx_queues[i].cv.wait(lock_rx, [this, i] { 
-                            return !this->rx_queues[i].queue.empty() || this->stop_signal_called->load(); 
-                        });
-
-                        while (!rx_queues[i].queue.empty()) {
-                            rx_blocks.push_back(std::move(rx_queues[i].queue.front()));
-                            rx_queues[i].queue.pop();
-                        }
+                        if (0 == PopBatchFromQueue<SampleBlock_t>(rx_queues_[i], rx_blocks))
+                            continue;   // No samples available, skip channel
 
                         // Detect Packets 
                         for (j = 0; j < rx_blocks.size(); ++j) {
-                                // Process all Samples in Block 
-                                for (unsigned int k = 0; k < rx_blocks[j].samples.size(); ++k) { 
+                            DetectFrame(rx_blocks[j], i);
+                        }; 
+                }; // for i num_channels
+                
+                // Push Frame-Samples to queue              
+                if (frame_samps_queue_ && !frame_samps_.empty()){ 
+                    PushBatchToQueue<FrameSamps_t>(*frame_samps_queue_, frame_samps_);
+                };
 
-                                    // Execute Synchronizer for channel i 
-                                    rx_sample[0]= rx_blocks[j].samples[k];
-                                    ms.Execute(i, &rx_sample);          
-                                        
-                                    // Check, if callback-data was updated by synchronizer
-                                    if (cb_data[i].buffer.size()){     
-                                        // Push Frame-Samples to queue              
-                                        if (frame_samps_queue){ 
-                                            ms.GetFrameSamps(i, &frame_samps.frame_samps);                          // Write frame-samples to callback data
-                                            frame_samps.timestamp = rx_blocks[j].timestamp;                     // Update timestamp
-                                            frame_samps.channel = i;                                                // Set channel index
-                                            {
-                                                std::lock_guard<std::mutex> lock_frame_samps(frame_samps_queue->mtx);
-                                                frame_samps_queue->queue.push(std::move(frame_samps));
-                                            }
-                                            frame_samps_queue->cv.notify_one();
-                                        };
-                                        // Push Callback-data to queue
-                                        if (cbdata_queue){ 
-                                            cb_data[i].timestamp = rx_blocks[j].timestamp;                      // Update timestamp
-                                            cb_data[i].channel = i;                                                 // Set channel index
-                                            {
-                                                std::lock_guard<std::mutex> lock_cb(cbdata_queue->mtx);
-                                                cbdata_queue->queue.push(std::move(cb_data[i]));
-                                            }
-                                            cbdata_queue->cv.notify_one();
-                                        };
-                                        // Print debug info 
-                                        std::cout << "Captured Frame for channel "<< i <<" at timestamp "<< frame_samps.timestamp.get_full_secs() << std::endl;
-                                    };
-                                };
-                            };
-                        };
+                // Push Frame-Symbols to queue
+                if (frame_syms_queue_ && !frame_syms_.empty()){ 
+                    PushBatchToQueue<FrameSyms_t>(*frame_syms_queue_, frame_syms_);
+                };
+
             } // while 
         };
 
     private:
-        /**
-         * @brief Internal MultiSync instance
-         * 
-         */
-        MultiSync<synchronizer_iface> ms;
 
         /**
-         * @brief Received samples queues for each channel
+         * @brief Callback data structure for userdata shared with the synchronizers in Callback-function
          * 
          */
-        std::array<RxSamplesQueue_t, num_channels> rx_queues;
+        struct CallbackData_t {
+            FrameSamps_t frame_samps;                   // Samples belonging to detected frames
+            FrameSyms_t frame_syms;                  // Symbols belonging to detected frames
+            MultiSync<synchronizer_iface>* ms_ptr;      // Pointer to MultiSync instance
+            unsigned int channel;                       // Channel index
+            bool frame_detected;                        // Frame detected indicator
+        };
 
         /**
-         * @brief Callback-data buffer for each channels's synchronizer 
+         * @brief Callback-data buffer shared by each channel-synchronizers callback-function 
          * 
          */
-        std::array<CallbackData_t, num_channels> cb_data;
+        CallbackData_t cb_data_;
 
         /**
          * @brief Array of pointers to Callback-data
          * 
          */
-        void* userdata[num_channels];
+        void* userdata_;
+
+        /**
+         * @brief Internal MultiSync instance
+         * 
+         */
+        MultiSync<synchronizer_iface> ms_;
+
+        /**
+         * @brief Vector of frame sample blocks detected in the last Execute cycle
+         * 
+         */
+        std::vector<FrameSamps_t> frame_samps_;
+
+        /**
+         * @brief Vector of frame data-symbols blocks detected in the last Execute cycle
+         * 
+         */
+        std::vector<FrameSyms_t> frame_syms_;
+
+        /**
+         * @brief Received samples queues for each channel
+         * 
+         */
+        std::array<SampleBlockQueue_t, num_channels> rx_queues_;
+
 
         /**
          * @brief Phase correction values queue to adjust NCO phases
          * 
          */
-        PhaseQueue_t phi_corr_queue;
+        PhaseQueue_t phi_corr_queue_;
 
         /**
          * @brief External queue to push detected frame samples
          * 
          */
-        FrameSampsQueue_t* frame_samps_queue;
+        FrameSampsQueue_t* frame_samps_queue_;
 
         /**
-         * @brief External queue to push callback-data of detected frames 
+         * @brief External queue to push detected frame data-symbols
          * 
          */
-        CbDataQueue_t* cbdata_queue;
+        FrameSymsQueue_t* frame_syms_queue_;
+
+        /**
+         * @brief Detect frames in the given rx-sample block for the specified channel. 
+         * The Frame samples and -symbols are stored in the internal cb_data_ structure.
+         * 
+         * @param rx_block Block of received samples with timestamp
+         * @param ch Channel index
+         * @return true Frame detected
+         * @return false No frame detected
+         */
+        void DetectFrame(SampleBlock_t& rx_block, unsigned int ch){ 
+                // Clear callback-data buffer
+                cb_data_.frame_samps.samples.clear();  
+                cb_data_.frame_syms.symbols.clear();      
+                cb_data_.frame_detected = false;          
+                cb_data_.channel = ch; 
+
+                // Execute Synchronizer 
+                ms_.Execute(ch, &rx_block.samples);          
+                    
+                // Process callback-data 
+                if (cb_data_.frame_detected) {    
+                        cb_data_.frame_samps.timestamp = rx_block.timestamp; 
+                        cb_data_.frame_syms.timestamp = rx_block.timestamp;      
+                        cb_data_.frame_samps.channel = ch; 
+                        cb_data_.frame_syms.channel = ch;  
+                        frame_samps_.push_back(cb_data_.frame_samps);    
+                        frame_syms_.push_back(cb_data_.frame_syms);          
+                };
+        };
+
+        /**
+         * @brief ofdmframesync callback function to push received symbols from synchronizer to the cb-data-queue
+         * 
+         * @param _X array of received subcarrier samples [size: _M x 1]
+         * @param _p subcarrier allocation array [size: _M x 1]
+         * @param _M number of subcarriers
+         * @param _cb_data pointer to internal cb-data structure
+         * @return return 1 to reset synchronizer after first data symbol
+         */
+        static int callback(std::complex<float>* _X, unsigned char * _p, unsigned int _M, void * _cb_data){
+            // Set detected frame indicator
+            CallbackData_t& cb = *static_cast<CallbackData_t*>(_cb_data);
+            cb.frame_detected = true;
+
+            // Add samples to callback-data buffer
+            cb.ms_ptr->GetFrameSamps(cb.channel, &cb.frame_samps.samples);   
+
+            // Add symbols from all subcarriers to callback-data buffer 
+            for (unsigned int i = 0; i < _M; ++i) {
+                // ignore 'null' and 'pilot' subcarriers
+                if (_p[i] != OFDMFRAME_SCTYPE_DATA)
+                    continue;
+                // Add data symbol to callback-data buffer
+                cb.frame_syms.symbols.push_back(_X[i]);  
+            }
+            // Reset synchronizer after returning the first data symbol (return 1)
+            return 1;
+        };
 
 };
 
