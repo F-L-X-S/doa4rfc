@@ -97,6 +97,108 @@ class MultithreadWorker {
             queues_.push_back(static_cast<detail::ThreadSafeQueueBase*>(queue));
         };
 
+        /**
+         * @brief Push item to the specified thread-safe queue
+         * 
+         * @tparam queue_item_t Type of the queue item
+         * @param q Reference to the thread-safe queue
+         * @param item Item to push to the queue
+         */
+        template <typename queue_item_t>
+        void PushItemToQueue(ThreadSafeQueue<queue_item_t>& q ,queue_item_t&& item) {
+            std::lock_guard<std::mutex> lock(q.mtx);
+            q.queue.push(std::forward<queue_item_t>(item));                            
+            q.cv.notify_one();
+        };
+
+        /**
+         * @brief Push batch of items to the specified thread-safe queue
+         * 
+         * @tparam queue_item_t Type of the queue item
+         * @param q Reference to the thread-safe queue
+         * @param buffer Vector containing the items to push to the queue
+         */
+        template <typename queue_item_t>
+        void PushBatchToQueue(ThreadSafeQueue<queue_item_t>& q , std::vector<queue_item_t>& buffer) {
+            std::lock_guard<std::mutex> lock(q.mtx);
+            while (!buffer.empty()) {
+                q.queue.push(std::move(buffer.back()));
+                buffer.pop_back(); 
+            };                           
+            q.cv.notify_one();
+        };
+
+        /**
+         * @brief Pop single item from the specified thread-safe queue to the provided buffer
+         * 
+         * @tparam queue_item_t Type of the queue item
+         * @param q Reference to the thread-safe queue
+         * @param buffer buffer to store the popped item
+         * @return bool Indicator, if an Item was popped from the queue
+         */
+        template <typename queue_item_t>
+        bool PopItemFromQueue(ThreadSafeQueue<queue_item_t>& q, queue_item_t& buffer) {
+                std::unique_lock<std::mutex> lock(q.mtx);
+                q.cv.wait(lock, [&q, this] { 
+                    return !q.queue.empty() || stop_signal_called->load(); 
+                });
+
+                if (!q.queue.empty()) {
+                    buffer = std::move(q.queue.front());
+                    q.queue.pop();
+                    return true;
+                }
+        };
+
+        /**
+         * @brief Pop batch of items from the specified thread-safe queue to the provided buffer
+         * 
+         * @tparam queue_item_t Type of the queue item
+         * @param q Reference to the thread-safe queue
+         * @param buffer Vector to store the popped items
+         * @param max_items Max. number of items to pop from the queue
+         * @return size_t Number of items actually popped from the queue
+         */
+        template <typename queue_item_t>
+        size_t PopItemFromQueue(ThreadSafeQueue<queue_item_t>& q, std::vector<queue_item_t>& buffer, size_t max_items) {
+                std::unique_lock<std::mutex> lock(q.mtx);
+                q.cv.wait(lock, [&q, this] { 
+                    return !q.queue.empty() || stop_signal_called->load(); 
+                });
+
+                size_t popped = 0;
+                while (popped < max_items && !q.queue.empty()) {
+                    buffer.emplace_back(std::move(q.queue.front()));
+                    q.queue.pop();
+                    ++popped;
+                }
+                return popped;
+        };
+
+        /**
+         * @brief Pop all items from the specified thread-safe queue to the provided buffer
+         * 
+         * @tparam queue_item_t Type of the queue item
+         * @param q Reference to the thread-safe queue
+         * @param buffer Vector to store the popped items
+         * @return size_t Number of items actually popped from the queue
+         */
+        template <typename queue_item_t>
+        size_t PopBatchFromQueue(ThreadSafeQueue<queue_item_t>& q, std::vector<queue_item_t>& buffer) {
+                std::unique_lock<std::mutex> lock(q.mtx);
+                q.cv.wait(lock, [&q, this] { 
+                    return !q.queue.empty() || stop_signal_called->load(); 
+                });
+
+                size_t popped = 0;
+                while (!q.queue.empty()) {
+                    buffer.emplace_back(std::move(q.queue.front()));
+                    q.queue.pop();
+                    ++popped;
+                }
+                return popped;
+        };
+
     private:
         /**
          * @brief Reference to sync-worker thread
