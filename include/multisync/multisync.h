@@ -122,7 +122,11 @@ public:
     void Execute(unsigned int           channel_id,
                 std::vector<std::complex<float>>* x)
                 {   
-                    nco_crcf_mix_block_up(nco_[channel_id],x->data(), x->data(),x->size());                 // Apply constant phase offset 
+                    // Apply constant phase offset 
+                    nco_crcf_mix_block_up(nco_[channel_id],
+                        reinterpret_cast<liquid_float_complex*>(x->data()), 
+                        reinterpret_cast<liquid_float_complex*>(x->data()),
+                        x->size());                 
                     synchronizer_interface::Execute(framesync_[channel_id], x->data(), x->size());
                 };
 

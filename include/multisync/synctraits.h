@@ -133,7 +133,7 @@ struct SyncTraits<ofdmframesync> {
      */
     static int Execute(SynchronizerType fs, std::complex<float>* x, unsigned int n) 
     {
-        return ofdmframesync_execute(fs, x, n);
+        return ofdmframesync_execute(fs, reinterpret_cast<liquid_float_complex*>(x), n);
     };
 
     /**
@@ -157,7 +157,7 @@ struct SyncTraits<ofdmframesync> {
     {
         unsigned int fft_size = ofdmframesync_get_fft_size(fs);
         X->resize(fft_size);
-        ofdmframesync_get_cfr(fs, X->data(), fft_size);
+        ofdmframesync_get_cfr(fs, reinterpret_cast<liquid_float_complex*>(X->data()), fft_size);
     };
 };
 
@@ -232,7 +232,7 @@ struct SyncTraits<flexframesync> {
      */
     static int Execute(SynchronizerType fs, std::complex<float>* x, unsigned int n) 
     {
-        return flexframesync_execute(fs, x, n);
+        return flexframesync_execute(fs, reinterpret_cast<liquid_float_complex*>(x), n);
     };
 
     /**
@@ -254,7 +254,7 @@ struct SyncTraits<flexframesync> {
     static void GetFrameSamps(SynchronizerType fs, std::vector<std::complex<float>>* X) 
     {
         X->resize(64);                                           // fixed size for flexframesync
-        flexframesync_get_frame_samps(fs, X->data(), X->size()); 
+        flexframesync_get_frame_samps(fs, reinterpret_cast<liquid_float_complex*>(X->data()), X->size()); 
     };
 };
 
