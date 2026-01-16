@@ -185,7 +185,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     std::cout << boost::format("Required RX Resampling Rate: %f ") % (rx_resamp_rate) << std::endl;
 
     // Thread-safe queues 
-    std::array<RxSamplesQueue_t, 2>& rx_queues = *sync.GetRxQueues();
+    std::array<SampleBlockQueue_t, 2>& rx_queues = *sync.GetRxQueues();
 
     std::thread t1(rx_worker<4096>, rx_stream_0, std::ref(rx_queues[0]), std::ref(stop_signal_called));
     std::thread t2(rx_worker<4096>, rx_stream_1, std::ref(rx_queues[1]), std::ref(stop_signal_called));
@@ -195,15 +195,15 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
 
     // ---------------------- Configure Export workers ----------------------
     // Add output-queues to sync-worker 
-    FrameSampsQueue_t cfr_queue;
-    CbDataQueue_t cbdata_queue;
-    sync.AddFrameSampsQueue(std::ref(cfr_queue));
-    sync.AddCbDataQueue(std::ref(cbdata_queue));
+    FrameSampsQueue_t frame_samps_queue;
+    FrameSymsQueue_t frame_syms_queue;
+    sync.AddFrameSampsQueue(std::ref(frame_samps_queue));
+    sync.AddFrameSymsQueue(std::ref(frame_syms_queue));
 
-    std::thread t4(cfr_export_worker<NUM_CHANNELS>, std::ref(cfr_queue), 
+    std::thread t4(cfr_export_worker<NUM_CHANNELS>, std::ref(frame_samps_queue), 
         max_age, std::ref(sender), std::ref(m_file_cfr), std::ref(stop_signal_called));
     
-    std::thread t5(cbdata_export_worker, std::ref(cbdata_queue), std::ref(m_file_cbdata), std::ref(stop_signal_called));
+    std::thread t5(cbdata_export_worker, std::ref(frame_syms_queue), std::ref(m_file_cbdata), std::ref(stop_signal_called));
 
     // ---------------------- Configure Transmit workers ----------------------
 

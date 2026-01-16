@@ -184,16 +184,16 @@ void tx_worker(uhd::tx_streamer::sptr tx_stream,
  */
 template <std::size_t buffer_size>
 void rx_worker( uhd::rx_streamer::sptr rx_stream,
-                RxSamplesQueue_t& q,
+                SampleBlockQueue_t& q,
                 std::atomic<bool>& stop_signal_called) {
     uhd::rx_metadata_t md;
     std::vector<Sample_t> buff(buffer_size);
 
     while (!stop_signal_called.load()) {
         size_t n_rx = rx_stream->recv(&buff.front(), buff.size(), md, 1.0);
-        RxSampleBlock_t sample_block;
+        SampleBlock_t sample_block;
         sample_block.samples.assign(buff.begin(), buff.begin() + n_rx);
-        sample_block.timestamp = md.time_spec;
+        sample_block.timestamp = md.time_spec.to_ticks(1e9); // Convert to nanoseconds
         {
             std::lock_guard<std::mutex> lock(q.mtx);
             q.queue.push(std::move(sample_block));
