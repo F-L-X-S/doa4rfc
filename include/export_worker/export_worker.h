@@ -52,7 +52,7 @@
  */
 template <std::size_t num_channels>
 void cfr_export_worker( FrameSampsQueue_t& frame_samps_queue, 
-                    uhd::time_spec_t max_age,
+                    uint64_t max_age,
                     ZmqSender& sender,
                     MatlabExport& m_file,
                     std::atomic<bool>& stop_signal_called) {
@@ -110,7 +110,7 @@ void cfr_export_worker( FrameSampsQueue_t& frame_samps_queue,
                 cfr_group = std::vector<std::vector<std::complex<float>>>(num_channels);
                 // Prepare CFRs sorted by channel
                 for (const auto& cfr : group) {
-                    cfr_group[cfr->channel] = cfr->frame_samps;;
+                    cfr_group[cfr->channel] = cfr->samples;
                 }
 
                 // ZMQ Export
@@ -119,9 +119,9 @@ void cfr_export_worker( FrameSampsQueue_t& frame_samps_queue,
                 // MATLAB Export 
                 std::cout << "Exported CFR at timestamps ";
                 for (const auto& cfr : group) {
-                    std::string timestamp = std::to_string(cfr->timestamp.get_full_secs())+std::to_string(cfr->timestamp.get_tick_count(1000));
+                    std::string timestamp = std::to_string(cfr->timestamp/1e6);
                     std::cout << "CH"<<cfr->channel<<": "<<timestamp << " ";
-                    m_file.Add(cfr->frame_samps, "CH" + std::to_string(cfr->channel) +"_"+timestamp);
+                    m_file.Add(cfr->samples, "CH" + std::to_string(cfr->channel) +"_"+timestamp);
                 }
                 std::cout <<"!"<< std::endl;
 
@@ -181,7 +181,7 @@ void cfr_export_worker( FrameSampsQueue_t& frame_samps_queue,
  * @param m_file Reference to the MatlabExport instance for exporting the callback-data items
  * @param stop_signal_called Stop signal to terminate the thread
  */
-void cbdata_export_worker(  CbDataQueue_t& cbdata_queue, 
+void cbdata_export_worker(  FrameSymsQueue_t& cbdata_queue, 
                             MatlabExport& m_file,
                             std::atomic<bool>& stop_signal_called);
 

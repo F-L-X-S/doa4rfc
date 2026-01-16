@@ -22,12 +22,12 @@
  * @param m_file Reference to the MatlabExport instance for exporting the callback-data items
  * @param stop_signal_called Stop signal to terminate the thread
  */
-void cbdata_export_worker(  CbDataQueue_t& cbdata_queue, 
+void cbdata_export_worker(  FrameSymsQueue_t& cbdata_queue, 
                             MatlabExport& m_file,
                             std::atomic<bool>& stop_signal_called) {
 
     // Queued cb-data 
-    std::vector<CallbackData_t> cbdata_buffer;    
+    std::vector<FrameSyms_t> cbdata_buffer;    
 
     unsigned int i;
     while (!stop_signal_called.load()) {
@@ -46,9 +46,9 @@ void cbdata_export_worker(  CbDataQueue_t& cbdata_queue,
 
         // Export CB-Data buffer to MATLAB file
         for (unsigned int i = 0; i < cbdata_buffer.size(); ++i) {
-            std::string timestamp = std::to_string(cbdata_buffer[i].timestamp.get_full_secs())+std::to_string(cbdata_buffer[i].timestamp.get_tick_count(1000));
+            std::string timestamp = std::to_string(cbdata_buffer[i].timestamp/1e6);
             std::string suffix = "CH" + std::to_string(cbdata_buffer[i].channel)+"_"+ timestamp;
-            m_file.Add(cbdata_buffer[i].buffer, suffix);
+            m_file.Add(cbdata_buffer[i].symbols, suffix);
         }
 
         // Clear the buffer
