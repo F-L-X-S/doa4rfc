@@ -15,9 +15,14 @@
  #include <sync_worker/sync_worker.h>
  #include <sdr_interfaces/zmq/interface_zmq.h>
 
+// RFC Settings
+#define NUM_CHANNELS 2
+
+#define FLEXFRAMESYNC
+//#define OFDMFRAMESYNC
+
 // ZMQ-socket for data import from Gnuradio
 #define IMPORT_INTERFACE "tcp://*:5554" 
-#define NUM_CHANNELS 2
 
 // ZMQ-socket for data export to MUSIC running in Python-application
 #define EXPORT_INTERFACE "tcp://*:5555" 
@@ -41,14 +46,21 @@ int main(int argc, char*argv[])
     std::string cmd = std::string(PYTHONPATH) + ' ' + std::string(MUSIC_PYFILE)+"&";
     system(cmd.c_str());
 
-    // ---------------------- OFDM-Framesync Synchronization Worker ----------------------
-    unsigned int M           = 256;         // number of subcarriers 
-    unsigned int cp_len      = 20;          // cyclic prefix length 
-    unsigned int taper_len   = 4;           // window taper length 
-    unsigned char p[M];                     // subcarrier allocation array
-    ofdmframe_init_default_sctype(M, p);    // initialize subcarrier allocation
-    SyncWorker<2, ofdmframesync_iface> sync({M, cp_len, taper_len, p}, std::ref(stop_signal_called));
-
+    // ---------------------- Synchronization Worker ----------------------
+    #ifdef OFDMFRAMESYNC
+            //Define OFDM-Framesync parameters
+            constexpr unsigned int M           = 256;   // number of subcarriers 
+            constexpr unsigned int cp_len      = 20;    // cyclic prefix length 
+            constexpr unsigned int taper_len   = 4;     // window taper length 
+            static unsigned char p[M];                  // subcarrier allocation array
+            ofdmframe_init_default_sctype(M, p);        // initialize subcarrier allocation
+            SyncWorker<NUM_CHANNELS, ofdmframesync_iface> sync({M, cp_len, taper_len, p}, std::ref(stop_signal_called));
+    #elif defined(FLEXFRAMESYNC)
+            SyncWorker<NUM_CHANNELS, flexframesync_iface> sync({}, std::ref(stop_signal_called));
+    #else 
+        #error "Synchronizer-Type not supported: Define OFDMFRAMESYNC or FLEXFRAMESYNC"
+    #endif
+    
     // Add output-queues to sync-worker 
     // FrameSampsQueue_t frame_samps_queue;
     // sync.AddFrameSampsQueue(std::ref(frame_samps_queue));
