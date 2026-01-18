@@ -245,10 +245,10 @@ blocks:
 - name: zeromq_push_sink_0
   id: zeromq_push_sink
   parameters:
-    address: tcp://*:5554
+    address: tcp://127.0.0.1:5554
     affinity: ''
     alias: ''
-    bind: 'True'
+    bind: 'False'
     comment: ''
     hwm: '-1'
     pass_tags: 'False'

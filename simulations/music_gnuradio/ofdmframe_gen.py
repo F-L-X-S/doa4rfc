@@ -69,7 +69,7 @@ class ofdmframe_gen(gr.top_block, Qt.QWidget):
         # Blocks
         ##################################################
 
-        self.zeromq_push_sink_0 = zeromq.push_sink(gr.sizeof_gr_complex, 64, 'tcp://*:5554', 100, False, (-1), True)
+        self.zeromq_push_sink_0 = zeromq.push_sink(gr.sizeof_gr_complex, 64, 'tcp://127.0.0.1:5554', 100, False, (-1), False)
         self.digital_ofdm_tx_0 = digital.ofdm_tx(
             fft_len=256,
             cp_len=20,
