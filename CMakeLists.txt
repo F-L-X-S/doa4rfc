@@ -62,7 +62,7 @@ add_library(multithread_worker_lib include/multithread_worker/multithread_worker
 target_link_libraries(multithread_worker_lib ${Boost_LIBRARIES})
 
 # sdr_interfaces
-add_library(sdr_interface_uhd_lib include/sdr_interfaces/sdr_interface_uhd.cc)
+add_library(sdr_interface_uhd_lib include/interfaces/uhd/sdr_interface_uhd.cc)
 target_link_libraries(sdr_interface_uhd_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES} )
 
 # matlab_export

@@ -43,7 +43,7 @@
 #include <mutex>
 #include <condition_variable>
 
-#include <sdr_interfaces/sdr_interface_uhd.h>
+#include <interfaces/uhd/sdr_interface_uhd.h>
 #include <sync_worker/sync_worker.h>
 #include <ui_worker/ui_worker.h>
 #include <export_worker/export_worker.h>
