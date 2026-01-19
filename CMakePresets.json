@@ -2,8 +2,8 @@
     "version": 8,
     "configurePresets": [
         {
-            "name": "Clang Debug",
-            "displayName": "Clang Debug",
+            "name": "ClangDebug",
+            "displayName": "ClangDebug",
             "description": "Used Compiler: C = /usr/bin/clang, CXX = /usr/bin/clang++",
             "binaryDir": "${sourceDir}/build/${presetName}",
             "cacheVariables": {
