@@ -74,7 +74,7 @@
  #include <signal_generator/signal_generator.h>
  #include <matlab_export/matlab_export.h>
  #include <multisync/multisync.h>
- #include <interfaces/zmq/zmq_if.h>
+ #include <zmq_if.h>
 
 // Definition of the transmission-settings 
 #define NUM_SAMPLES 1200            // Total Number of samples to be generated 

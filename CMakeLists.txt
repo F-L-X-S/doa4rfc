@@ -25,24 +25,6 @@ set(BUILD_DOC        OFF CACHE BOOL "" FORCE)
 add_subdirectory(external/liquid-dsp)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external/liquid-dsp/include)
 
-# ZeroMQ
-# libzmq (remove for using local zmq installation)
-FetchContent_Declare(
-  libzmq
-  GIT_REPOSITORY https://github.com/zeromq/libzmq.git
-  GIT_TAG v4.3.5  
-)
-FetchContent_MakeAvailable(libzmq)
-
-# ZeroMQ
-# cppzmq (C++ Header-Wrapper)
-FetchContent_Declare(
-  cppzmq
-  GIT_REPOSITORY https://github.com/zeromq/cppzmq.git
-  GIT_TAG v4.10.0
-)
-FetchContent_MakeAvailable(cppzmq)
-target_include_directories(cppzmq INTERFACE ${cppzmq_SOURCE_DIR})
 
 # Find UHD
 find_package(UHD REQUIRED)
@@ -68,10 +50,6 @@ target_link_libraries(sdr_interface_uhd_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES} 
 # matlab_export
 add_library(matlab_export_lib include/matlab_export/matlab_export.cc)
 
-# zmq_if
-add_library(zmq_if include/interfaces/zmq/zmq_if.cc)
-target_link_libraries(zmq_if cppzmq)
-
 # export_worker
 add_library(export_worker_lib include/export_worker/export_worker.cc)
 target_link_libraries(export_worker_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES} zmq_if matlab_export_lib ) 
@@ -84,6 +62,8 @@ target_link_libraries(ui_worker_lib ${Boost_LIBRARIES} )
 add_library(signal_generator_lib include/signal_generator/signal_generator.cc)
 target_link_libraries(signal_generator_lib ${Boost_LIBRARIES} liquid) 
 
+# ZeroMQ
+add_subdirectory(include/interfaces/zmq)
 # ---------- Main Application  ----------------
 # source files
 set(MAIN_SRC_FILES
