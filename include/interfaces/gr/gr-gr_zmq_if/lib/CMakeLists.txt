@@ -24,7 +24,6 @@ if(NOT gr_zmq_if_sources)
     return()
 endif(NOT gr_zmq_if_sources)
 
-find_package(ZeroMQ REQUIRED)
 add_library(gnuradio-gr_zmq_if SHARED ${gr_zmq_if_sources})
 target_link_libraries(
     gnuradio-gr_zmq_if 
@@ -41,6 +40,11 @@ if(APPLE)
     set_target_properties(gnuradio-gr_zmq_if PROPERTIES INSTALL_NAME_DIR
                                                     "${CMAKE_INSTALL_PREFIX}/lib")
 endif(APPLE)
+
+set_target_properties(gnuradio-gr_zmq_if PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED YES
+)
 
 ########################################################################
 # Install built library files
