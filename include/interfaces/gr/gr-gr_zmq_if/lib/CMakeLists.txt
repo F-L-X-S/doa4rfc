@@ -12,7 +12,8 @@
 include(GrPlatform) #define LIB_SUFFIX
 
 list(APPEND gr_zmq_if_sources
-    zmq_tx_impl.cc)
+    zmq_tx_impl.cc
+    ../../../zmq/zmq_if.cc)
 
 set(gr_zmq_if_sources
     "${gr_zmq_if_sources}"
@@ -22,12 +23,17 @@ if(NOT gr_zmq_if_sources)
     return()
 endif(NOT gr_zmq_if_sources)
 
+find_package(ZeroMQ REQUIRED)
 add_library(gnuradio-gr_zmq_if SHARED ${gr_zmq_if_sources})
-target_link_libraries(gnuradio-gr_zmq_if gnuradio::gnuradio-runtime)
+target_link_libraries(
+    gnuradio-gr_zmq_if 
+    gnuradio::gnuradio-runtime
+    zmq)
 target_include_directories(
     gnuradio-gr_zmq_if
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
-    PUBLIC $<INSTALL_INTERFACE:include>)
+    PUBLIC $<INSTALL_INTERFACE:include>
+    PRIVATE ../../../zmq)
 set_target_properties(gnuradio-gr_zmq_if PROPERTIES DEFINE_SYMBOL "gnuradio_gr_zmq_if_EXPORTS")
 
 if(APPLE)

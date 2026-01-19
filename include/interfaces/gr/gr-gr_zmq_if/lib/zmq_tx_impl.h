@@ -9,7 +9,7 @@
 #define INCLUDED_GR_ZMQ_IF_ZMQ_TX_IMPL_H
 
 #include <gnuradio/gr_zmq_if/zmq_tx.h>
-#include <zmq_socket/zmq_socket.h>
+#include <zmq_if.h>
 #include <pmt/pmt.h>
 
 namespace gr {
