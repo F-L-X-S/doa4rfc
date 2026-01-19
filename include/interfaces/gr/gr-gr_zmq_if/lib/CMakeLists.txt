@@ -13,6 +13,7 @@ include(GrPlatform) #define LIB_SUFFIX
 
 list(APPEND gr_zmq_if_sources
     zmq_tx_impl.cc
+    ../../../../multithread_worker/multithread_worker.cc
     ../../../zmq/zmq_if.cc)
 
 set(gr_zmq_if_sources
@@ -33,7 +34,7 @@ target_include_directories(
     gnuradio-gr_zmq_if
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
     PUBLIC $<INSTALL_INTERFACE:include>
-    PRIVATE ../../../zmq)
+    PRIVATE ../../../../)
 set_target_properties(gnuradio-gr_zmq_if PROPERTIES DEFINE_SYMBOL "gnuradio_gr_zmq_if_EXPORTS")
 
 if(APPLE)
