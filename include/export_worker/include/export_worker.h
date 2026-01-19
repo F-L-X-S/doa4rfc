@@ -31,15 +31,15 @@
 #include <multisync.h>
 #include <sync_worker.h>
 #include <zmq_if.h>
-#include <matlab_export/matlab_export.h>
+#include <matlabXport.hpp>
 
 /**
  * @brief The cfr_export_worker first identifies queued CFRs in the frame-samps queue whose timestamps all fall within a specified time range 
  * and whose channel numbers are all unique within that group. 
  * Grouping minimizes the number of forwarded CFRs that correspond to frames not detected across all channels. 
- * Once a complete group is identified, the function exports the group simultaneously through the referenced ZmqSender and MatlabExport instances. 
+ * Once a complete group is identified, the function exports the group simultaneously through the referenced ZmqSender and MatlabXport instances. 
  * The function includes buffer management to maintain efficiency by removing processed CFRss without valid groups while retaining a minimum number of entries per channel. 
- * At termination, it adds plotting commands to the MatlabExport instance to visualize magnitude, phase, and complex representation of the exported CFRs. 
+ * At termination, it adds plotting commands to the MatlabXport instance to visualize magnitude, phase, and complex representation of the exported CFRs. 
  * 
  * This function is executed within a dedicated thread.
  * 
@@ -47,14 +47,14 @@
  * @param frame_samps_queue Reference to the thread-safe queue storing the detected CFRs
  * @param max_age Time-range within which the timestamps of a CFRs corresponding to one frame must fall
  * @param sender Reference to the ZmqSender instance for exporting the CFR groups
- * @param m_file Reference to the MatlabExport instance for exporting the CFR groups
+ * @param m_file Reference to the MatlabXport instance for exporting the CFR groups
  * @param stop_signal_called Stop signal to terminate the thread
  */
 template <std::size_t num_channels>
 void cfr_export_worker( FrameSampsQueue_t& frame_samps_queue, 
                     uint64_t max_age,
                     ZmqSender& sender,
-                    MatlabExport& m_file,
+                    MatlabXport& m_file,
                     std::atomic<bool>& stop_signal_called) {
 
     // Queued CFRs of all channels and all times 
@@ -171,18 +171,18 @@ void cfr_export_worker( FrameSampsQueue_t& frame_samps_queue,
 }
 
 /**
- * @brief cbdata_export_worker is responsible for forwarding the queued callback-data items to the associated MatlabExport instance.
+ * @brief cbdata_export_worker is responsible for forwarding the queued callback-data items to the associated MatlabXport instance.
  * Upon termination, the worker additionally generates the Matlab plotting commands required to visualize the constellation diagrams 
- * of all received frames and appends them to the MatlabExport instance.
+ * of all received frames and appends them to the MatlabXport instance.
  * 
  * This function is executed within a dedicated thread.
  * 
  * @param cbdata_queue Reference to thread-safe queue storing the callback-data items
- * @param m_file Reference to the MatlabExport instance for exporting the callback-data items
+ * @param m_file Reference to the MatlabXport instance for exporting the callback-data items
  * @param stop_signal_called Stop signal to terminate the thread
  */
 void cbdata_export_worker(  FrameSymsQueue_t& cbdata_queue, 
-                            MatlabExport& m_file,
+                            MatlabXport& m_file,
                             std::atomic<bool>& stop_signal_called);
 
 

@@ -65,7 +65,7 @@
  #include <cassert>
  #include <liquid.h>
  #include <signal_generator/signal_generator.h>
- #include <matlab_export/matlab_export.h>
+ #include <matlabXport.hpp>
 
 // Definition of the transmission-settings 
 #define NUM_SAMPLES 1200            // Total Number of samples to be generated 
@@ -216,7 +216,7 @@ int main(int argc, char*argv[])
     ofdmframesync_destroy(fs);
 
     // ----------------- MATLAB Export ----------------------
-    MatlabExport m_file(OUTFILE);           // Create MATLAB export instance
+    MatlabXport m_file(OUTFILE);           // Create MATLAB export instance
     m_file.Add(rx, "x")                     // Add received signal to MATLAB file          
     .Add(cb_data.buffer, "datasymbols")     // Add detected symbols to MATLAB file
     .Add(cb_data.cfo, "cfo")                // Add estimated CFO to MATLAB file

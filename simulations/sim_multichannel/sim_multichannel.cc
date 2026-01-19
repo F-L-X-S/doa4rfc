@@ -67,7 +67,7 @@
  #include <cassert>
  #include <liquid.h>
  #include <signal_generator/signal_generator.h>
- #include <matlab_export/matlab_export.h>
+ #include <matlabXport.hpp>
  #include <multisync.h>
 
 // Definition of the transmission-settings 
@@ -240,7 +240,7 @@ int main(int argc, char*argv[])
     };
 
     // ----------------- MATLAB Export ----------------------
-    MatlabExport m_file(OUTFILE);                                   // Create MATLAB export instance
+    MatlabXport m_file(OUTFILE);                                   // Create MATLAB export instance
     
     // Export variables for all channels to MATLAB file
     for (unsigned int ch = 0; ch < NUM_CHANNELS; ++ch) {

@@ -9,21 +9,21 @@
  * 
  */
 
-#include <export_worker/export_worker.h>
+#include <export_worker.h>
 
 /**
- * @brief cbdata_export_worker is responsible for forwarding the queued callback-data items to the associated MatlabExport instance.
+ * @brief cbdata_export_worker is responsible for forwarding the queued callback-data items to the associated MatlabXport instance.
  * Upon termination, the worker additionally generates the Matlab plotting commands required to visualize the constellation diagrams 
- * of all received frames and appends them to the MatlabExport instance.
+ * of all received frames and appends them to the MatlabXport instance.
  * 
  * This function is executed within a dedicated thread.
  * 
  * @param cbdata_queue Reference to thread-safe queue storing the callback-data items
- * @param m_file Reference to the MatlabExport instance for exporting the callback-data items
+ * @param m_file Reference to the MatlabXport instance for exporting the callback-data items
  * @param stop_signal_called Stop signal to terminate the thread
  */
 void cbdata_export_worker(  FrameSymsQueue_t& cbdata_queue, 
-                            MatlabExport& m_file,
+                            MatlabXport& m_file,
                             std::atomic<bool>& stop_signal_called) {
 
     // Queued cb-data 

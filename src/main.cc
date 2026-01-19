@@ -46,7 +46,7 @@
 #include <uhd_if.h>
 #include <sync_worker.h>
 #include <ui_worker/ui_worker.h>
-#include <export_worker/export_worker.h>
+#include <export_worker.h>
 
 #define NUM_CHANNELS 2                                          // Number of Channels (USRP-devices)   
 #define SYMBOLS_PER_FRAME 1                                     // Number of Symbols to send per frame 
@@ -77,8 +77,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     system(cmd.c_str());
 
     // Matlab Export destination file
-    MatlabExport m_file_cfr(OUTFILE_CFR);
-    MatlabExport m_file_cbdata(OUTFILE_CBDATA);
+    MatlabXport m_file_cfr(OUTFILE_CFR);
+    MatlabXport m_file_cbdata(OUTFILE_CBDATA);
 
     // USRP Constants
     unsigned long int DAC_RATE = 400e6;             // USRP DAC Rate (N210 fixed to 400MHz)

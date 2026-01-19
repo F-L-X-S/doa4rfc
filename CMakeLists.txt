@@ -31,10 +31,16 @@ find_package(UHD REQUIRED)
 
 # Find Boost
 find_package(Boost REQUIRED COMPONENTS program_options thread)
-
-# Include-Paths
 include_directories(${Boost_INCLUDE_DIRS})
 include_directories(${UHD_INCLUDE_DIRS})
+
+# MatlabXport
+FetchContent_Declare(
+    matlabXport
+    GIT_REPOSITORY https://github.com/F-L-X-S/matlabXport
+    GIT_TAG main  
+)
+FetchContent_MakeAvailable(matlabXport)
 
 # ---------- internal libraries ----------------
 add_subdirectory(include/multisync)
@@ -42,15 +48,9 @@ add_subdirectory(include/sync_worker)
 add_subdirectory(include/multithread_worker)
 add_subdirectory(include/interfaces/uhd)
 add_subdirectory(include/interfaces/zmq)
+add_subdirectory(include/export_worker)
 
 include_directories(include)
-
-# matlab_export
-add_library(matlab_export_lib include/matlab_export/matlab_export.cc)
-
-# export_worker
-add_library(export_worker_lib include/export_worker/export_worker.cc)
-target_link_libraries(export_worker_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES} zmq_if matlab_export_lib ) 
 
 # ui_worker
 add_library(ui_worker_lib include/ui_worker/ui_worker.cc)
@@ -74,10 +74,10 @@ target_link_libraries(
   ${PROJECT_NAME} 
     multithread_worker
     uhd_if
-    export_worker_lib
+    export_worker
     ui_worker_lib
     signal_generator_lib
-    matlab_export_lib
+    matlabXport_lib
     liquid
     zmq_if
     ${UHD_LIBRARIES}
@@ -106,10 +106,10 @@ foreach(SOURCE_FILE ${SIMULATIONS_SRC_FILES})
   target_link_libraries(${EXECUTABLE_NAME}
     multithread_worker
     uhd_if
-    export_worker_lib
+    export_worker
     ui_worker_lib
     signal_generator_lib
-    matlab_export_lib
+    matlabXport_lib
     liquid
     zmq_if
     ${UHD_LIBRARIES}
