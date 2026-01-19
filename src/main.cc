@@ -45,7 +45,7 @@
 
 #include <uhd_if.h>
 #include <sync_worker.h>
-#include <ui_worker/ui_worker.h>
+#include <ui_worker.h>
 #include <export_worker.h>
 
 #define NUM_CHANNELS 2                                          // Number of Channels (USRP-devices)   

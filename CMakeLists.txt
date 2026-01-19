@@ -50,13 +50,9 @@ add_subdirectory(include/interfaces/uhd)
 add_subdirectory(include/interfaces/zmq)
 add_subdirectory(include/export_worker)
 add_subdirectory(include/signal_generator)
+add_subdirectory(include/ui_worker)
 
 include_directories(include)
-
-# ui_worker
-add_library(ui_worker_lib include/ui_worker/ui_worker.cc)
-target_link_libraries(ui_worker_lib ${Boost_LIBRARIES} sync_worker) 
-
 # ---------- Main Application  ----------------
 # source files
 set(MAIN_SRC_FILES
@@ -72,7 +68,7 @@ target_link_libraries(
     multithread_worker
     uhd_if
     export_worker
-    ui_worker_lib
+    ui_worker
     signal_generator
     matlabXport_lib
     liquid
@@ -104,7 +100,7 @@ foreach(SOURCE_FILE ${SIMULATIONS_SRC_FILES})
     multithread_worker
     uhd_if
     export_worker
-    ui_worker_lib
+    ui_worker
     signal_generator
     matlabXport_lib
     liquid
