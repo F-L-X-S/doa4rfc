@@ -1,5 +1,5 @@
 /**
- * @file zmq_socket.cc
+ * @file zmq_if.cc
  * @author Felix Schuelke (flxscode@gmail.com)
  * 
  * @brief This file contains the definition of the ZmqSender class, which is used to send vector-formatted data via ZeroMQ sockets.
@@ -10,7 +10,7 @@
  * 
  */
 
-#include "zmq_socket.h"
+#include "zmq_if.h"
 #include <cstring>
 
 using namespace zmq_socket_types;

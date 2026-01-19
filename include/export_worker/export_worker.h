@@ -30,7 +30,7 @@
 
 #include <multisync/multisync.h>
 #include <sync_worker/sync_worker.h>
-#include <zmq_socket/zmq_socket.h>
+#include <interfaces/zmq/zmq_if.h>
 #include <matlab_export/matlab_export.h>
 
 /**

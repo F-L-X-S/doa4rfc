@@ -1,5 +1,5 @@
 /**
- * @file sdr_interface_zmq.h
+ * @file zmq_if.h
  * @author Felix Schuelke (flxscode@gmail.com)
  * 
  * @brief 
@@ -9,11 +9,12 @@
  * 
  */
 
-#ifndef SDR_INTERFACE_ZMQ
-#define SDR_INTERFACE_ZMQ
+#ifndef ZMQ_IF
+#define ZMQ_IF
 
-#include <vector>                     
-#include <complex>      
+#include <zmq.hpp>
+#include <vector>
+#include <complex>  
 
 #include <queue>       
 #include <mutex>                    
@@ -28,7 +29,38 @@
 
 #include <sync_worker/sync_worker.h>
 #include <multithread_worker/multithread_worker.h>
-#include <zmq_socket/zmq_socket.h>
+
+namespace zmq_socket_types {
+    using Sample_t = std::complex<float>;
+    using SampleBatch_t = std::vector<Sample_t>;
+    using MultiChannelSampleBatch_t = std::vector<SampleBatch_t>;
+    using MultiMeasurementSampleBatch_t = std::vector<MultiChannelSampleBatch_t>;
+}
+
+using namespace zmq_socket_types;
+
+class ZmqSender {
+public:
+    ZmqSender(const std::string& endpoint);
+    void send(const SampleBatch_t& data);
+    void send(const MultiChannelSampleBatch_t& data);
+    void send(const MultiMeasurementSampleBatch_t& data);
+
+private:
+    zmq::context_t context_;
+    zmq::socket_t socket_;
+};
+
+class ZmqReceiver {
+public:
+    ZmqReceiver(const std::string& endpoint);
+    SampleBatch_t receive();
+    MultiChannelSampleBatch_t receiveMultiChannel();
+    
+private:
+    zmq::context_t context_;
+    zmq::socket_t socket_;
+};
 
 /**
  * @brief ZmqRxWorker class receives samples from a ZMQ socket and pushes them into channel-specific rx-sample queues.
@@ -171,4 +203,4 @@ class ZmqTxWorker: public MultithreadWorker{
 };
 
 
-#endif // SDR_INTERFACE_ZMQ
+#endif // ZMQ_IF

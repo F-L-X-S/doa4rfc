@@ -9,7 +9,7 @@
  * 
  */
 
-#include <sdr_interfaces/sdr_interface_uhd.h>
+#include <interfaces/uhd/sdr_interface_uhd.h>
 
 /**
  * @brief tx_worker reads the referenced buffer at the specified cycle time and forwards the data 

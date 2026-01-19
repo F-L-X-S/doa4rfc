@@ -68,13 +68,13 @@ target_link_libraries(sdr_interface_uhd_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES} 
 # matlab_export
 add_library(matlab_export_lib include/matlab_export/matlab_export.cc)
 
-# zmq_socket
-add_library(zmq_socket include/zmq_socket/zmq_socket.cc)
-target_link_libraries(zmq_socket cppzmq)
+# zmq_if
+add_library(zmq_if include/interfaces/zmq/zmq_if.cc)
+target_link_libraries(zmq_if cppzmq)
 
 # export_worker
 add_library(export_worker_lib include/export_worker/export_worker.cc)
-target_link_libraries(export_worker_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES} zmq_socket matlab_export_lib ) 
+target_link_libraries(export_worker_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES} zmq_if matlab_export_lib ) 
 
 # ui_worker
 add_library(ui_worker_lib include/ui_worker/ui_worker.cc)
@@ -103,7 +103,7 @@ target_link_libraries(
     signal_generator_lib
     matlab_export_lib
     liquid
-    zmq_socket
+    zmq_if
     ${UHD_LIBRARIES}
     ${Boost_LIBRARIES}
   )
@@ -135,7 +135,7 @@ foreach(SOURCE_FILE ${SIMULATIONS_SRC_FILES})
     signal_generator_lib
     matlab_export_lib
     liquid
-    zmq_socket
+    zmq_if
     ${UHD_LIBRARIES}
     ${Boost_LIBRARIES}
   )
