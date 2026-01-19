@@ -73,7 +73,7 @@
  #include <liquid.h>
  #include <signal_generator/signal_generator.h>
  #include <matlab_export/matlab_export.h>
- #include <multisync/multisync.h>
+ #include <multisync.h>
  #include <zmq_if.h>
 
 // Definition of the transmission-settings 

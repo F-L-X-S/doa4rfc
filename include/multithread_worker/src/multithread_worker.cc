@@ -9,7 +9,7 @@
  * 
  */
 
-#include <multithread_worker/multithread_worker.h>
+#include <multithread_worker.h>
 
 /** 
  * @brief Construct a new Multithread Worker object

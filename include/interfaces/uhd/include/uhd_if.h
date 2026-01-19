@@ -1,5 +1,5 @@
 /**
- * @file sdr_interface_uhd.h
+ * @file uhd_if.h
  * @author Felix Schuelke (flxscode@gmail.com)
  * 
  * @brief 
@@ -9,8 +9,8 @@
  * 
  */
 
-#ifndef SDR_INTERFACE_UHD
-#define SDR_INTERFACE_UHD
+#ifndef UHD_IF
+#define UHD_IF
 
 #include <uhd/usrp/multi_usrp.hpp>    
               
@@ -28,7 +28,7 @@
 #include <boost/thread.hpp>
 #include <iostream>
 
-#include <sync_worker/sync_worker.h>
+#include <sync_worker.h>
 
 /**
  * @brief The stream_worker function references the UHD USRP interfaces, configuring all available instances simultaneously, 
@@ -202,4 +202,4 @@ void rx_worker( uhd::rx_streamer::sptr rx_stream,
     }
 }
 
-#endif // SDR_INTERFACE_UHD
+#endif // UHD_IF

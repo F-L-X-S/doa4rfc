@@ -12,14 +12,14 @@
  #include <csignal>
 
  #include <liquid.h>
- #include <sync_worker/sync_worker.h>
- #include <sdr_interfaces/zmq/interface_zmq.h>
+ #include <sync_worker.h>
+ #include <zmq_if.h>
 
 // RFC Settings
-#define NUM_CHANNELS 2
+#define NUM_CHANNELS 1
 
-#define FLEXFRAMESYNC
-//#define OFDMFRAMESYNC
+//#define FLEXFRAMESYNC
+#define OFDMFRAMESYNC
 
 // ZMQ-socket for data import from Gnuradio
 #define IMPORT_INTERFACE "tcp://*:5554" 

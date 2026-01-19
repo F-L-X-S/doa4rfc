@@ -27,8 +27,8 @@
 #include <boost/thread.hpp>
 #include <iostream>
 
-#include <sync_worker/sync_worker.h>
-#include <multithread_worker/multithread_worker.h>
+#include <sync_worker.h>
+#include <multithread_worker.h>
 
 namespace zmq_socket_types {
     using Sample_t = std::complex<float>;

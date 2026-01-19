@@ -32,8 +32,8 @@
  
  #include <liquid.h>
  #include <signal_generator/signal_generator.h>
- #include <multisync/multisync.h>
- #include <include/interfaces/zmq/zmq_if.h.h>
+ #include <multisync.h>
+ #include <zmq_if.h>
 
 // Definition of the transmission-settings 
 #define FRAME_PADDING 30            // Noisy samples around the frame (before and after) 

@@ -28,8 +28,8 @@
 
 #include <uhd/usrp/multi_usrp.hpp>   
 
-#include <multisync/multisync.h>
-#include <sync_worker/sync_worker.h>
+#include <multisync.h>
+#include <sync_worker.h>
 #include <zmq_if.h>
 #include <matlab_export/matlab_export.h>
 

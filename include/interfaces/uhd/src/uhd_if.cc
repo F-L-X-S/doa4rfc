@@ -1,5 +1,5 @@
 /**
- * @file sdr_interface_uhd.h
+ * @file uhd_if.cc
  * @author Felix Schuelke (flxscode@gmail.com)
  * 
  * @brief 
@@ -9,7 +9,7 @@
  * 
  */
 
-#include <interfaces/uhd/sdr_interface_uhd.h>
+#include <uhd_if.h>
 
 /**
  * @brief tx_worker reads the referenced buffer at the specified cycle time and forwards the data 

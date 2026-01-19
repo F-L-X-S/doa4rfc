@@ -26,7 +26,7 @@
 #include <boost/thread.hpp>
 #include <iostream>
 
-#include <sync_worker/sync_worker.h>
+#include <sync_worker.h>
 
 /**
  * @brief terminal_worker reads terminal inputs. 

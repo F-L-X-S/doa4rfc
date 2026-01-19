@@ -37,15 +37,13 @@ include_directories(${Boost_INCLUDE_DIRS})
 include_directories(${UHD_INCLUDE_DIRS})
 
 # ---------- internal libraries ----------------
+add_subdirectory(include/multisync)
+add_subdirectory(include/sync_worker)
+add_subdirectory(include/multithread_worker)
+add_subdirectory(include/interfaces/uhd)
+add_subdirectory(include/interfaces/zmq)
+
 include_directories(include)
-
-# multithread_worker
-add_library(multithread_worker_lib include/multithread_worker/multithread_worker.cc)
-target_link_libraries(multithread_worker_lib ${Boost_LIBRARIES})
-
-# sdr_interfaces
-add_library(sdr_interface_uhd_lib include/interfaces/uhd/sdr_interface_uhd.cc)
-target_link_libraries(sdr_interface_uhd_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES} )
 
 # matlab_export
 add_library(matlab_export_lib include/matlab_export/matlab_export.cc)
@@ -56,14 +54,12 @@ target_link_libraries(export_worker_lib ${UHD_LIBRARIES} ${Boost_LIBRARIES} zmq_
 
 # ui_worker
 add_library(ui_worker_lib include/ui_worker/ui_worker.cc)
-target_link_libraries(ui_worker_lib ${Boost_LIBRARIES} ) 
+target_link_libraries(ui_worker_lib ${Boost_LIBRARIES} sync_worker) 
 
 # signal_generator
 add_library(signal_generator_lib include/signal_generator/signal_generator.cc)
 target_link_libraries(signal_generator_lib ${Boost_LIBRARIES} liquid) 
 
-# ZeroMQ
-add_subdirectory(include/interfaces/zmq)
 # ---------- Main Application  ----------------
 # source files
 set(MAIN_SRC_FILES
@@ -76,8 +72,8 @@ add_executable(${PROJECT_NAME} ${MAIN_SRC_FILES})
 # link libraries to executable
 target_link_libraries(
   ${PROJECT_NAME} 
-    multithread_worker_lib
-    sdr_interface_uhd_lib
+    multithread_worker
+    uhd_if
     export_worker_lib
     ui_worker_lib
     signal_generator_lib
@@ -108,8 +104,8 @@ foreach(SOURCE_FILE ${SIMULATIONS_SRC_FILES})
 
   # Link libraries to the executable
   target_link_libraries(${EXECUTABLE_NAME}
-    multithread_worker_lib
-    sdr_interface_uhd_lib
+    multithread_worker
+    uhd_if
     export_worker_lib
     ui_worker_lib
     signal_generator_lib

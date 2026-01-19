@@ -27,8 +27,8 @@
 #include <boost/thread.hpp>
 #include <iostream>
 
-#include <multithread_worker/multithread_worker.h>
-#include <multisync/multisync.h>
+#include <multithread_worker.h>
+#include <multisync.h>
 
 /**
  * @brief Single Sample Type

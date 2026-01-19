@@ -32,4 +32,5 @@ target_include_directories(zmq_if PUBLIC include)
 
 # Set lib-dependencies
 target_link_libraries(zmq_if PUBLIC cppzmq)
-target_link_libraries(zmq_if PUBLIC multithread_worker_lib)
+target_link_libraries(zmq_if PUBLIC multithread_worker)
+target_link_libraries(zmq_if PUBLIC sync_worker)

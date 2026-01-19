@@ -32,7 +32,7 @@
 #include <cassert>
 #include <concepts>
 #include <liquid.h>
-#include <multisync/synctraits.h>
+#include <synctraits.h>
 
 /**
  * @brief Abstract MultiSync class to handle multiple instances of generic frame synchronizers. 
