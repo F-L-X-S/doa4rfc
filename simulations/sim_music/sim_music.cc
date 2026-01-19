@@ -71,7 +71,7 @@
  #include <cassert>
  
  #include <liquid.h>
- #include <signal_generator/signal_generator.h>
+ #include <signal_generator.h>
  #include <matlabXport.hpp>
  #include <multisync.h>
  #include <zmq_if.h>
