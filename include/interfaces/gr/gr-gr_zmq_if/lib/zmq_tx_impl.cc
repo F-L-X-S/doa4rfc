@@ -16,7 +16,7 @@ namespace gr {
     #pragma message("set the following appropriately and remove this warning")
     using output_type = float;
     zmq_tx::sptr
-    zmq_tx::make(endpoint)
+    zmq_tx::make(const std::string& endpoint)
     {
       return gnuradio::make_block_sptr<zmq_tx_impl>(
         endpoint);
@@ -26,11 +26,11 @@ namespace gr {
     /*
      * The private constructor
      */
-    zmq_tx_impl::zmq_tx_impl(endpoint)
+    zmq_tx_impl::zmq_tx_impl(const std::string& endpoint)
       : gr::block("zmq_tx",
               gr::io_signature::make(1 /* min inputs */, 1 /* max inputs */, sizeof(input_type)),
-              gr::io_signature::make(1 /* min outputs */, 1 /*max outputs */, sizeof(output_type)),
-              sender_(endpoint))
+              gr::io_signature::make(1 /* min outputs */, 1 /*max outputs */, sizeof(output_type))),
+        sender_(endpoint)
     {}
 
     /*
@@ -66,17 +66,38 @@ namespace gr {
       return noutput_items;
     }
 
+
     void zmq_tx_impl::handle_msg(pmt::pmt_t msg)
     {
+        using namespace zmq_socket_types;
+
         if (!pmt::is_u8vector(msg)) {
             throw std::runtime_error("zmq_tx: expected u8vector");
         }
 
         size_t len;
-        const uint8_t* data =
-            pmt::u8vector_elements(msg, len);
+        const uint8_t* data = pmt::u8vector_elements(msg, len);
 
-        socket_.send(zmq::buffer(data, len), zmq::send_flags::none);
+        if (len % (2 * sizeof(float)) != 0) {
+            throw std::runtime_error("zmq_tx: message length not multiple of complex<float> size");
+        }
+
+        size_t num_samples = len / (2 * sizeof(float));
+        SampleBatch_t batch;
+        batch.reserve(num_samples);
+
+        for (size_t i = 0; i < num_samples; ++i) {
+            float real_part;
+            float imag_part;
+
+            // Copy Bytes in Floats
+            std::memcpy(&real_part, data + i * 2 * sizeof(float), sizeof(float));
+            std::memcpy(&imag_part, data + i * 2 * sizeof(float) + sizeof(float), sizeof(float));
+
+            batch.emplace_back(real_part, imag_part);
+        }
+
+        sender_.send(batch); 
     }
 
   } /* namespace gr_zmq_if */

@@ -32,7 +32,7 @@ namespace gr {
        * class. gr_zmq_if::zmq_tx::make is the public interface for
        * creating new instances.
        */
-      static sptr make(endpoint);
+      static sptr make(const std::string& endpoint);
     };
 
   } // namespace gr_zmq_if

@@ -23,9 +23,9 @@ namespace gr {
         void handle_msg(pmt::pmt_t msg);
 
      public:
-      zmq_tx_impl(endpoint);
+      zmq_tx_impl(const std::string& endpoint);
       ~zmq_tx_impl();
-
+      
       // Where all the action really happens
       void forecast (int noutput_items, gr_vector_int &ninput_items_required);
 
