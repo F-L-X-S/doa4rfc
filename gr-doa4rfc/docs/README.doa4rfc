@@ -1,0 +1,11 @@
+This is the doa4rfc-write-a-block package meant as a guide to building
+out-of-tree packages. To use the doa4rfc blocks, the Python namespaces
+is in 'doa4rfc', which is imported as:
+
+    import doa4rfc
+
+See the Doxygen documentation for details about the blocks available
+in this package. A quick listing of the details can be found in Python
+after importing by using:
+
+    help(doa4rfc)
