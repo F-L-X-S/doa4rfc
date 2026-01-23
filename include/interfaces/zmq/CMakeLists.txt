@@ -1,4 +1,6 @@
 # ---------------- External Dependencies ----------------
+include(FetchContent)
+
 # ZeroMQ
 # libzmq (remove for using local zmq installation)
 FetchContent_Declare(
