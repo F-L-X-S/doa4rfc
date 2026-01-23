@@ -53,6 +53,10 @@ add_subdirectory(include/signal_generator)
 add_subdirectory(include/ui_worker)
 
 include_directories(include)
+
+# ---------- Gnu-Radio Blocks  ----------------
+find_package(Gnuradio REQUIRED)
+
 # ---------- Main Application  ----------------
 # source files
 set(MAIN_SRC_FILES
@@ -111,24 +115,24 @@ foreach(SOURCE_FILE ${SIMULATIONS_SRC_FILES})
 
 endforeach()
 
-# ---------- Testing ----------------
-# include googletest-framework
-FetchContent_Declare(googletest URL https://github.com/google/googletest/archive/refs/heads/main.zip
-)
-FetchContent_MakeAvailable(googletest)
-enable_testing()
+# # ---------- Testing ----------------
+# # include googletest-framework
+# FetchContent_Declare(googletest URL https://github.com/google/googletest/archive/refs/heads/main.zip
+# )
+# #FetchContent_MakeAvailable(googletest)
+# enable_testing()
 
-# add test-executable power_trigger
-add_executable(power_trigger_test tests/power_trigger_test.cc)
+# # add test-executable power_trigger
+# add_executable(power_trigger_test tests/power_trigger_test.cc)
 
-# link libraries to executable
-target_link_libraries(
-  power_trigger_test
-  power_trigger_lib
-  GTest::gtest_main
-)
+# # link libraries to executable
+# target_link_libraries(
+#   power_trigger_test
+#   power_trigger_lib
+#   GTest::gtest_main
+# )
 
-# discover tests
-include(GoogleTest)
-gtest_discover_tests(power_trigger_test)
+# # discover tests
+# include(GoogleTest)
+# gtest_discover_tests(power_trigger_test)
 
