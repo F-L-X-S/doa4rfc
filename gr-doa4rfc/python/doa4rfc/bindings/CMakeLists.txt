@@ -24,7 +24,8 @@ include(GrPybind)
 # Python Bindings
 ########################################################################
 
-list(APPEND doa4rfc_python_files python_bindings.cc)
+list(APPEND doa4rfc_python_files
+    zmq_if_python.cc python_bindings.cc)
 
 gr_pybind_make_oot(doa4rfc ../../.. gr::doa4rfc "${doa4rfc_python_files}")
 

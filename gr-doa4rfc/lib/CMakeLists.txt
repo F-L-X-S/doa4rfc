@@ -11,7 +11,8 @@
 ########################################################################
 include(GrPlatform) #define LIB_SUFFIX
 
-list(APPEND doa4rfc_sources)
+list(APPEND doa4rfc_sources
+    zmq_if_impl.cc)
 
 set(doa4rfc_sources
     "${doa4rfc_sources}"
@@ -54,7 +55,9 @@ include(GrTest)
 # If your unit tests require special include paths, add them here
 #include_directories()
 # List all files that contain Boost.UTF unit tests here
-list(APPEND test_doa4rfc_sources)
+
+list(APPEND test_doa4rfc_sources
+)
 # Anything we need to link to for the unit tests go here
 list(APPEND GR_TEST_TARGET_DEPS gnuradio-doa4rfc)
 

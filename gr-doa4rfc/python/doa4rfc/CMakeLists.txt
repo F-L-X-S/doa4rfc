@@ -34,3 +34,4 @@ add_custom_target(
     copy_module_for_tests ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}
             ${PROJECT_BINARY_DIR}/test_modules/gnuradio/doa4rfc/)
+GR_ADD_TEST(qa_zmq_if ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/qa_zmq_if.py)

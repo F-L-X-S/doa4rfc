@@ -6,4 +6,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-install(FILES DESTINATION share/gnuradio/grc/blocks)
+install(FILES
+    doa4rfc_zmq_if.block.yml DESTINATION share/gnuradio/grc/blocks)
