@@ -1,24 +1,22 @@
 # ---------------- External Dependencies ----------------
 include(FetchContent)
+find_package(PkgConfig REQUIRED)
+
 
 # ZeroMQ
-# libzmq (remove for using local zmq installation)
-FetchContent_Declare(
-  libzmq
-  GIT_REPOSITORY https://github.com/zeromq/libzmq.git
-  GIT_TAG v4.3.5  
-)
-FetchContent_MakeAvailable(libzmq)
+pkg_check_modules(PC_ZeroMQ QUIET zmq)
 
-# ZeroMQ
-# cppzmq (C++ Header-Wrapper)
-FetchContent_Declare(
-  cppzmq
-  GIT_REPOSITORY https://github.com/zeromq/cppzmq.git
-  GIT_TAG v4.10.0
-)
-FetchContent_MakeAvailable(cppzmq)
-target_include_directories(cppzmq INTERFACE ${cppzmq_SOURCE_DIR})
+## use the hint from above to find where 'zmq.hpp' is located
+find_path(ZeroMQ_INCLUDE_DIR
+        NAMES zmq.hpp
+        PATHS ${PC_ZeroMQ_INCLUDE_DIRS}
+        )
+
+## use the hint from above to find the location of libzmq
+find_library(ZeroMQ_LIBRARY
+        NAMES zmq
+        PATHS ${PC_ZeroMQ_LIBRARY_DIRS}
+        )
 
 # Boost
 find_package(Boost REQUIRED COMPONENTS program_options thread)
@@ -30,9 +28,12 @@ add_library(zmq_if STATIC
 )
 
 # Set include-dirs
-target_include_directories(zmq_if PUBLIC include)
+target_include_directories(zmq_if PUBLIC include PUBLIC ${ZeroMQ_INCLUDE_DIR})
 
 # Set lib-dependencies
-target_link_libraries(zmq_if PUBLIC cppzmq)
-target_link_libraries(zmq_if PUBLIC multithread_worker)
-target_link_libraries(zmq_if PUBLIC sync_worker)
+target_link_libraries(zmq_if
+    PUBLIC
+        ${ZeroMQ_LIBRARY}
+        multithread_worker
+        sync_worker
+)
