@@ -169,9 +169,9 @@ Make sure, the receiving antennas are spaced by the half wavelength of the carri
 Make sure, that all USRPs are connected via separate Ethernet interfaces, since the datarate can possibly cause overflows in the shared-Etehrnet mode. Check the USRP connection by running `uhd_find_devices`. 
 
 #### How to install the doa4rfc Gnuradio-OOT module 
- 1. `cd`to `gr-doa4rfc/build` (create, if not existing) <br>
- 2. `cmake -DCMAKE_INSTALL_PREFIX=/opt/homebrew ../` (replace with your grc installation path)<br>
- 3. `make`<br>
+ 1. `cd` to `gr-doa4rfc/build` (create, if not existing) <br>
+ 2. Run `cmake -DCMAKE_INSTALL_PREFIX=/opt/homebrew ../` (replace with your grc installation path)<br>
+ 3. Run `make`<br>
  4. `sudo make install`<br>
  5. Open gnuradio-companion and refresh your blocks. A new doa4rfc section should appear below the core module. 
 
