@@ -17,6 +17,7 @@ set(CMAKE_BUILD_TYPE
 # Project setup
 ########################################################################
 cmake_minimum_required(VERSION 3.16)
+
 project(gr-doa4rfc CXX C)
 enable_testing()
 
@@ -33,6 +34,7 @@ endif()
 
 # Make sure our local CMake Modules path comes first
 list(INSERT CMAKE_MODULE_PATH 0 ${PROJECT_SOURCE_DIR}/cmake/Modules)
+
 # Find gnuradio to get access to the cmake modules
 find_package(Gnuradio "3.10" REQUIRED)
 
@@ -104,6 +106,14 @@ endif(APPLE)
 # Find gnuradio build dependencies
 ########################################################################
 find_package(Doxygen)
+
+# External Dependencies doa4rfc
+find_package(liquid REQUIRED)
+find_package(multisync REQUIRED)
+find_package(multithread_worker REQUIRED)
+find_package(sync_worker REQUIRED)
+find_package(zmq_if REQUIRED)
+
 
 ########################################################################
 # Setup doxygen option
