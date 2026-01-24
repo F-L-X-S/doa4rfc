@@ -9,6 +9,7 @@
 #define INCLUDED_DOA4RFC_ZMQ_IF_IMPL_H
 
 #include <gnuradio/doa4rfc/zmq_if.h>
+#include <zmq_if.h>
 
 namespace gr {
   namespace doa4rfc {
@@ -16,7 +17,7 @@ namespace gr {
     class zmq_if_impl : public zmq_if
     {
      private:
-      // Nothing to declare in this block.
+      ZmqSender sender_;
 
      public:
       zmq_if_impl(std::string endpoint);
