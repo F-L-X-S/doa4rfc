@@ -162,11 +162,18 @@ Make sure, the receiving antennas are spaced by the half wavelength of the carri
     pip install -e . 
    ``` 
 4. Use the CMake extension to configure the project 
-5. Set `doa4rfc` as target for build and execution (or any example-file)
+5. Set `doa4rfc` as target for build and execution (or any sim-file)
 6. Go to the vscode "run and debug" menu and start the `Debug (Clang CMake Preset)` task to build and run the specified target 
 <br><br>
 
 Make sure, that all USRPs are connected via separate Ethernet interfaces, since the datarate can possibly cause overflows in the shared-Etehrnet mode. Check the USRP connection by running `uhd_find_devices`. 
+
+#### How to install the doa4rfc Gnuradio-OOT module 
+ 1. `cd`to `gr-doa4rfc/build` (create, if not existing) <br>
+ 2. `cmake -DCMAKE_INSTALL_PREFIX=/opt/homebrew ../` (replace with your grc installation path)<br>
+ 3. `make`<br>
+ 4. `sudo make install`<br>
+ 5. Open gnuradio-companion and refresh your blocks. A new doa4rfc section should appear below the core module. 
 
 ### Main Dependencies
 - [ZMQ](https://zeromq.org/languages/cplusplus/) for socket communication with the Python-implemented DoA Algorithm 
