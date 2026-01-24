@@ -11,6 +11,9 @@
 ########################################################################
 include(GrPlatform) #define LIB_SUFFIX
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 list(APPEND doa4rfc_sources
     zmq_if_impl.cc)
 
@@ -23,7 +26,16 @@ if(NOT doa4rfc_sources)
 endif(NOT doa4rfc_sources)
 
 add_library(gnuradio-doa4rfc SHARED ${doa4rfc_sources})
-target_link_libraries(gnuradio-doa4rfc gnuradio::gnuradio-runtime)
+
+target_link_libraries(gnuradio-doa4rfc 
+            gnuradio::gnuradio-runtime
+            liquid::liquid
+            multisync::multisync
+            multithread_worker::multithread_worker
+            sync_worker::sync_worker
+            zmq_if::zmq_if  
+            )
+
 target_include_directories(
     gnuradio-doa4rfc
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
