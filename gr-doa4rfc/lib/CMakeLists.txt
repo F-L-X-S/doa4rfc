@@ -27,6 +27,29 @@ endif(NOT doa4rfc_sources)
 
 add_library(gnuradio-doa4rfc SHARED ${doa4rfc_sources})
 
+if(APPLE)
+    set_target_properties(gnuradio-doa4rfc PROPERTIES
+        MACOSX_RPATH ON
+        # since gnuradio blocks are shared libraries, the .dylibs will be placed in /lib of the specified directory
+        # therefore the @loader_path is set to DCMAKE_INSTALL_PREFIX/lib (e.g. cmake -DCMAKE_INSTALL_PREFIX=/opt/homebrew)
+        BUILD_RPATH "@loader_path"          
+        INSTALL_RPATH "@loader_path"
+    )
+endif()
+
+# install all dependencies to @loader_path/lib
+get_target_property(LIQUID_LIB liquid::liquid LOCATION)                         # SHARED main-library 
+get_target_property(LIQUID_VERSIONED_LIBS liquid::liquid LIQUID_VERSIONED_LIBS) # SHARED versioned-librarys  
+
+if(APPLE)
+    install(
+        FILES
+            ${LIQUID_LIB}               # SHARED main-library 
+            ${LIQUID_VERSIONED_LIBS}    # SHARED versioned-librarys  
+        DESTINATION lib # install dir relative to DCMAKE_INSTALL_PREFIX e.g. cmake -DCMAKE_INSTALL_PREFIX=/opt/homebrew
+    )
+endif()
+
 target_link_libraries(gnuradio-doa4rfc 
             gnuradio::gnuradio-runtime
             liquid::liquid
@@ -41,11 +64,6 @@ target_include_directories(
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
     PUBLIC $<INSTALL_INTERFACE:include>)
 set_target_properties(gnuradio-doa4rfc PROPERTIES DEFINE_SYMBOL "gnuradio_doa4rfc_EXPORTS")
-
-if(APPLE)
-    set_target_properties(gnuradio-doa4rfc PROPERTIES INSTALL_NAME_DIR
-                                                    "${CMAKE_INSTALL_PREFIX}/lib")
-endif(APPLE)
 
 ########################################################################
 # Install built library files

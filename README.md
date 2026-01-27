@@ -170,10 +170,9 @@ Make sure, that all USRPs are connected via separate Ethernet interfaces, since 
 
 #### How to install the doa4rfc Gnuradio-OOT module 
  1. `cd` to `gr-doa4rfc/build` (create, if not existing) <br>
- 2. Run `cmake -DCMAKE_INSTALL_PREFIX=/opt/homebrew ../` (replace with your grc installation path)<br>
- 3. Run `make`<br>
- 4. `sudo make install`<br>
- 5. Open gnuradio-companion and refresh your blocks. A new doa4rfc section should appear below the core module. 
+ 2. Run `cmake -DCMAKE_INSTALL_PREFIX=/opt/homebrew ../` (replace with your grc path, since gnuradio blocks are shared libraries the .dylibs will be placed in /lib of the specified directory)<br>
+ 3. Run `make -j && sudo make install`<br>
+ 4. Open gnuradio-companion and refresh your blocks. A new doa4rfc section should appear below the core module. 
 
 ### Main Dependencies
 - [ZMQ](https://zeromq.org/languages/cplusplus/) for socket communication with the Python-implemented DoA Algorithm 
