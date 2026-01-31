@@ -13,9 +13,8 @@ include(GrPlatform) #define LIB_SUFFIX
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
 list(APPEND doa4rfc_sources
-    zmq_if_impl.cc)
+    zmq_if_sink_impl.cc )
 
 set(doa4rfc_sources
     "${doa4rfc_sources}"

@@ -16,12 +16,12 @@
 
 
 
- static const char *__doc_gr_doa4rfc_zmq_if = R"doc()doc";
+ static const char *__doc_gr_doa4rfc_zmq_if_sink = R"doc()doc";
 
 
- static const char *__doc_gr_doa4rfc_zmq_if_zmq_if_0 = R"doc()doc";
+ static const char *__doc_gr_doa4rfc_zmq_if_sink_zmq_if_sink_0 = R"doc()doc";
 
 
- static const char *__doc_gr_doa4rfc_zmq_if_make = R"doc()doc";
+ static const char *__doc_gr_doa4rfc_zmq_if_sink_make = R"doc()doc";
 
   

@@ -13,8 +13,8 @@
 /* If manual edits are made, the following tags should be modified accordingly.    */
 /* BINDTOOL_GEN_AUTOMATIC(1)                                                       */
 /* BINDTOOL_USE_PYGCCXML(0)                                                        */
-/* BINDTOOL_HEADER_FILE(zmq_if.h)                                        */
-/* BINDTOOL_HEADER_FILE_HASH(87248058d3266e127aba51a915f52a6d)                     */
+/* BINDTOOL_HEADER_FILE(zmq_if_sink.h)                                        */
+/* BINDTOOL_HEADER_FILE_HASH(96d2a1abd3413755cc01e0907fec80d9)                     */
 /***********************************************************************************/
 
 #include <pybind11/complex.h>
@@ -23,21 +23,21 @@
 
 namespace py = pybind11;
 
-#include <gnuradio/doa4rfc/zmq_if.h>
+#include <gnuradio/doa4rfc/zmq_if_sink.h>
 // pydoc.h is automatically generated in the build directory
-#include <zmq_if_pydoc.h>
+#include <zmq_if_sink_pydoc.h>
 
-void bind_zmq_if(py::module& m)
+void bind_zmq_if_sink(py::module& m)
 {
 
-    using zmq_if    = gr::doa4rfc::zmq_if;
+    using zmq_if_sink    = gr::doa4rfc::zmq_if_sink;
 
 
-    py::class_<zmq_if, gr::sync_block, gr::block, gr::basic_block,
-        std::shared_ptr<zmq_if>>(m, "zmq_if", D(zmq_if))
+    py::class_<zmq_if_sink, gr::sync_block, gr::block, gr::basic_block,
+        std::shared_ptr<zmq_if_sink>>(m, "zmq_if_sink", D(zmq_if_sink))
 
-        .def(py::init(&zmq_if::make),
-           D(zmq_if,make)
+        .def(py::init(&zmq_if_sink::make),
+           D(zmq_if_sink,make)
         )
         
 

@@ -6,16 +6,17 @@
  */
 
 #include <gnuradio/io_signature.h>
-#include "zmq_if_impl.h"
+#include "zmq_if_sink_impl.h"
 
 namespace gr {
   namespace doa4rfc {
 
+    // #pragma message("set the following appropriately and remove this warning")
     using input_type = gr_complex;
-    zmq_if::sptr
-    zmq_if::make(std::string endpoint)
+    zmq_if_sink::sptr
+    zmq_if_sink::make(std::string endpoint)
     {
-      return gnuradio::make_block_sptr<zmq_if_impl>(
+      return gnuradio::make_block_sptr<zmq_if_sink_impl>(
         endpoint);
     }
 
@@ -23,23 +24,22 @@ namespace gr {
     /*
      * The private constructor
      */
-    zmq_if_impl::zmq_if_impl(std::string endpoint)
-      : gr::sync_block("zmq_if",
-              gr::io_signature::make(1 /* min inputs */, gr::io_signature::IO_INFINITE /* max inputs */, sizeof(input_type)),
-              gr::io_signature::make(0, 0, 0)
-            ),
+    zmq_if_sink_impl::zmq_if_sink_impl(std::string endpoint)
+      : gr::sync_block("zmq_if_sink",
+              gr::io_signature::make(1 /* min inputs */, 1 /* max inputs */, sizeof(input_type)),
+              gr::io_signature::make(0, 0, 0)),
         sender_(endpoint)
     {}
 
     /*
      * Our virtual destructor.
      */
-    zmq_if_impl::~zmq_if_impl()
+    zmq_if_sink_impl::~zmq_if_sink_impl()
     {
     }
 
     int
-    zmq_if_impl::work(int noutput_items,
+    zmq_if_sink_impl::work(int noutput_items,
         gr_vector_const_void_star &input_items,
         gr_vector_void_star &output_items)
     {
@@ -60,6 +60,9 @@ namespace gr {
 
       // Send received samples from all ports to TCP endpoint 
       sender_.send(send_buffer);
+
+      // Tell runtime system how many output items we produced.
+      return noutput_items;
 
       // Tell runtime system how many output items we produced.
       return noutput_items;

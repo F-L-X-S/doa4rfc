@@ -21,7 +21,7 @@ namespace py = pybind11;
 // Please do not delete
 /**************************************/
 // BINDING_FUNCTION_PROTOTYPES(
-    void bind_zmq_if(py::module& m);
+    void bind_zmq_if_sink(py::module& m);
 // ) END BINDING_FUNCTION_PROTOTYPES
 
 
@@ -50,6 +50,6 @@ PYBIND11_MODULE(doa4rfc_python, m)
     // Please do not delete
     /**************************************/
     // BINDING_FUNCTION_CALLS(
-    bind_zmq_if(m);
+    bind_zmq_if_sink(m);
     // ) END BINDING_FUNCTION_CALLS
 }

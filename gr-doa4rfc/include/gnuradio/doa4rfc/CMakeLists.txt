@@ -10,4 +10,4 @@
 # Install public header files
 ########################################################################
 install(FILES api.h
-    zmq_if.h DESTINATION include/gnuradio/doa4rfc)
+    zmq_if_sink.h DESTINATION include/gnuradio/doa4rfc)

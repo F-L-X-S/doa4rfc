@@ -1,10 +1,10 @@
-id: doa4rfc_zmq_if
-label: zmq_if
+id: doa4rfc_zmq_if_sink
+label: zmq_if_sink
 category: '[doa4rfc]'
 
 templates:
   imports: from gnuradio import doa4rfc
-  make: doa4rfc.zmq_if(${endpoint})
+  make: doa4rfc.zmq_if_sink(${endpoint})
 
 #  Make one 'parameters' list entry for every parameter you want settable from the GUI.
 #     Keys include:
@@ -16,7 +16,7 @@ parameters:
 - id: endpoint
   label: TCP Endpoint
   dtype: string
-  default: "tcp://*:5554"
+  default: "tcp://127.0.0.1:5554"
 #- id: ...
 #  label: ...
 #  dtype: ...
