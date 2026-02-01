@@ -106,7 +106,6 @@ class MultithreadWorker {
          */
         template <typename queue_item_t>
         void PushItemToQueue(ThreadSafeQueue<queue_item_t>& q ,queue_item_t&& item) {
-            std::lock_guard<std::mutex> lock(q.mtx);
             q.queue.push(std::forward<queue_item_t>(item));                            
             q.cv.notify_one();
         };
@@ -120,7 +119,6 @@ class MultithreadWorker {
          */
         template <typename queue_item_t>
         void PushBatchToQueue(ThreadSafeQueue<queue_item_t>& q , std::vector<queue_item_t>& buffer) {
-            std::lock_guard<std::mutex> lock(q.mtx);
             while (!buffer.empty()) {
                 q.queue.push(std::move(buffer.back()));
                 buffer.pop_back(); 
