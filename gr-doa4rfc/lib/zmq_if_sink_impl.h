@@ -17,11 +17,17 @@ namespace gr {
     class zmq_if_sink_impl : public zmq_if_sink
     {
      private:
-      ZmqSender sender_;
+      std::atomic<bool> stop_signal;              // Thread-safe stop signal for ZmqTxWorker
+      MultiChFrameSampsQueue_t tx_queue;          // Transmit queue for ZmqTxWorker
+      ZmqTxWorker<MultiChFrameSamps_t> sender_;   // ZMQ transmission worker
 
      public:
       zmq_if_sink_impl(std::string endpoint);
       ~zmq_if_sink_impl();
+
+      // Override start/stop to ensure proper thread start / shutdown
+      bool start() override;
+      bool stop() override;
 
       // Where all the action really happens
       int work(
