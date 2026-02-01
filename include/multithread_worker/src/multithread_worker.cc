@@ -55,6 +55,7 @@ void MultithreadWorker::StopWorker() {
     if (thread_){
         thread_->join();
         delete thread_;  
+        thread_ = nullptr;
     };          
 }
 
