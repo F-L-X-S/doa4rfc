@@ -111,8 +111,8 @@ MultiChannelSampleBatch_t ZmqReceiver::receiveMultiChannel()
 {
     // Receive raw message
     zmq::message_t message;
-    if (!socket_.recv(message, zmq::recv_flags::none)) {
-        throw std::runtime_error("ZMQ receive failed");
+    if (!socket_.recv(message, zmq::recv_flags::dontwait)) {
+        return MultiChannelSampleBatch_t{}; // No message received
     }
 
     // Parse Header:  × uint32_t
