@@ -80,14 +80,26 @@ int main(int argc, char*argv[])
     sync.RunWorker();   
     zmq_rx_worker.RunWorker();
     zmq_tx_worker.RunWorker();
-
-    while (!stop_signal_called.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    }
+    std::cout << "Started Workers..." << std::endl;
+    // Let run for 10 sec
+    std::this_thread::sleep_for(std::chrono::milliseconds(5000));
 
     sync.StopWorker();
     zmq_rx_worker.StopWorker();
     zmq_tx_worker.StopWorker();
+    std::cout << "Stopped Workers..." << std::endl;
+    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
 
+    sync.RunWorker();   
+    zmq_rx_worker.RunWorker();
+    zmq_tx_worker.RunWorker();
+    std::cout << "Started Workers..." << std::endl;
+    // Let run for 10 sec
+    std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+
+    sync.StopWorker();
+    zmq_rx_worker.StopWorker();
+    zmq_tx_worker.StopWorker();
+    std::cout << "Stopped Workers..." << std::endl;
     return 0;
 }
