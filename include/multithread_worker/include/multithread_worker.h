@@ -139,7 +139,7 @@ class MultithreadWorker {
         template <typename queue_item_t>
         bool PopItemFromQueue(ThreadSafeQueue<queue_item_t>& q, queue_item_t& buffer) {
                 std::unique_lock<std::mutex> lock(q.mtx);
-                q.cv.wait(lock, [&q, this] { 
+                q.cv.wait_for(lock, std::chrono::milliseconds(100), [&q, this] { 
                     return !q.queue.empty() || stop_signal_called->load(); 
                 });
 
@@ -162,7 +162,7 @@ class MultithreadWorker {
         template <typename queue_item_t>
         size_t PopItemFromQueue(ThreadSafeQueue<queue_item_t>& q, std::vector<queue_item_t>& buffer, size_t max_items) {
                 std::unique_lock<std::mutex> lock(q.mtx);
-                q.cv.wait(lock, [&q, this] { 
+                q.cv.wait_for(lock, std::chrono::milliseconds(100), [&q, this] { 
                     return !q.queue.empty() || stop_signal_called->load(); 
                 });
 
@@ -186,7 +186,7 @@ class MultithreadWorker {
         template <typename queue_item_t>
         size_t PopBatchFromQueue(ThreadSafeQueue<queue_item_t>& q, std::vector<queue_item_t>& buffer) {
                 std::unique_lock<std::mutex> lock(q.mtx);
-                q.cv.wait(lock, [&q, this] { 
+                q.cv.wait_for(lock, std::chrono::milliseconds(100), [&q, this] { 
                     return !q.queue.empty() || stop_signal_called->load(); 
                 });
 
