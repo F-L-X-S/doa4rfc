@@ -22,7 +22,6 @@
 #include <cstdlib>
 #include <cassert>
 
-
 /**
  * @brief Generate a sequence of samples, containing a repeating pattern of the length `symbol_len`, 
  *        that is repeated 'symbol_repetitions' times. 
@@ -31,9 +30,9 @@
  * @param x Pointer to the output array where the generated sequence will be stored.
  * @param mod_type Modulation type for the symbols.
  */
-void GenerateRepeatingSequence(unsigned int symbol_len, unsigned int symbol_repetitions, std::complex<float>* x, modulation_scheme mod_type) {
+void GenerateRepeatingSequence(unsigned int symbol_len, unsigned int symbol_repetitions, Sample_t* x, modulation_scheme mod_type) {
     // Create a symbol 
-    std::complex<float> symbol[symbol_len];  
+    Sample_t symbol[symbol_len];  
     modemcf mod = modemcf_create(mod_type);
     for (unsigned int i=0; i<symbol_len; i++)
         modemcf_modulate(mod, rand()%4, &symbol[i]);
@@ -43,7 +42,7 @@ void GenerateRepeatingSequence(unsigned int symbol_len, unsigned int symbol_repe
     unsigned int t=0;
     for (unsigned int i=0; i<symbol_repetitions; i++) {
         // copy symbol-samples 
-        memmove(&x[t], symbol, symbol_len*sizeof(std::complex<float>));
+        memmove(&x[t], symbol, symbol_len*sizeof(Sample_t));
         t += symbol_len;
     }
 };
@@ -56,10 +55,10 @@ void GenerateRepeatingSequence(unsigned int symbol_len, unsigned int symbol_repe
  * @param pattern_repetitions Number of times the pattern should be repeated.
  * @param x Pointer to the output array where the generated sequence will be stored.
  */
-void GenerateRepeatingSequence(std::complex<float>* pattern, unsigned int pattern_len, unsigned int symbol_repetitions, std::complex<float>* x) {
+void GenerateRepeatingSequence(Sample_t* pattern, unsigned int pattern_len, unsigned int symbol_repetitions, Sample_t* x) {
     unsigned int t = 0;
     for (unsigned int i = 0; i < symbol_repetitions; i++) {
-        memmove(&x[t], pattern, pattern_len * sizeof(std::complex<float>));
+        memmove(&x[t], pattern, pattern_len * sizeof(Sample_t));
         t += pattern_len;
     }
 }
@@ -73,7 +72,7 @@ void GenerateRepeatingSequence(std::complex<float>* pattern, unsigned int patter
  * @param seq_start Startng-position in the longer sequence where the shorter sequence will be inserted
  * @param seq_len Length of the shorter sequence
  */
-void InsertSequence(std::complex<float>* long_sequence, std::complex<float>* short_sequence, unsigned int seq_start, unsigned int seq_len) {
+void InsertSequence(Sample_t* long_sequence, Sample_t* short_sequence, unsigned int seq_start, unsigned int seq_len) {
     for (unsigned int i=0; i<seq_len; i++)
         long_sequence[seq_start+i] = short_sequence[i];
 };
@@ -86,7 +85,7 @@ void InsertSequence(std::complex<float>* long_sequence, std::complex<float>* sho
  * @param sequence_len Length of the sequence.
  * @param SNRdB Signal-to-noise ratio in decibels.
  */
-void AddNoise(std::complex<float>* sequence, unsigned int sequence_len, float SNRdB) {
+void AddNoise(Sample_t* sequence, unsigned int sequence_len, float SNRdB) {
     float nstd = powf(10.0f, -SNRdB/20.0f);
     for (unsigned int i=0; i<sequence_len; i++)
         cawgn(&sequence[i],nstd);

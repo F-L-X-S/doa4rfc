@@ -9,7 +9,7 @@ add_library(ui_worker STATIC
 )
 
 # Set include-dirs
-target_include_directories(ui_worker PUBLIC include)
+target_include_directories(ui_worker PUBLIC include ${PROJECT_INCLUDE_DIR})
 
 # Set lib-dependencies
 target_link_libraries(ui_worker PUBLIC ${Boost_LIBRARIES} sync_worker)

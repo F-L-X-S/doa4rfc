@@ -6,4 +6,4 @@ add_library(signal_generator STATIC
 )
 
 # Set include-dirs
-target_include_directories(signal_generator PUBLIC include)
+target_include_directories(signal_generator PUBLIC include ${PROJECT_INCLUDE_DIR})

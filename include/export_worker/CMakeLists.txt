@@ -22,7 +22,7 @@ add_library(export_worker STATIC
 )
 
 # Set include-dirs
-target_include_directories(export_worker PUBLIC include)
+target_include_directories(export_worker PUBLIC include ${PROJECT_INCLUDE_DIR})
 
 # Set lib-dependencies
-target_link_libraries(export_worker PUBLIC ${UHD_LIBRARIES} ${Boost_LIBRARIES} matlabXport_lib sync_worker multisync sync_worker zmq_if)
+target_link_libraries(export_worker PUBLIC ${UHD_LIBRARIES} ${Boost_LIBRARIES} matlabXport_lib multisync sync_worker zmq_if)

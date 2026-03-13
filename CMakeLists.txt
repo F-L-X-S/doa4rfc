@@ -43,6 +43,9 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(matlabXport)
 
 # ---------- internal libraries ----------------
+include_directories(include)
+set(PROJECT_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
+ 
 add_subdirectory(include/multisync)
 add_subdirectory(include/sync_worker)
 add_subdirectory(include/multithread_worker)
@@ -51,8 +54,6 @@ add_subdirectory(include/interfaces/zmq)
 add_subdirectory(include/export_worker)
 add_subdirectory(include/signal_generator)
 add_subdirectory(include/ui_worker)
-
-include_directories(include)
 
 # ---------- Gnu-Radio Blocks  ----------------
 find_package(Gnuradio REQUIRED)

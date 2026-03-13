@@ -27,6 +27,9 @@
 #include <cassert>
 #include <concepts>
 #include <liquid.h>
+#include <doa4rfc.h>
+
+using namespace doa4rfc;
 
 /**
  * @brief Concept to check that the SyncTraits Template-specialization provides the required interface for MultiSync.
@@ -41,9 +44,9 @@ concept SyncTraitsConcept = requires(
     typename SyncTraitsSpecification::CallbackType callback,                    // Callback function 
     typename SyncTraitsSpecification::CreateParams createParams,                // Parameters for synchronizer create function
 
-    std::complex<float>* x,                 // Pointer to input samples array for Execute function
+    Sample_t* x,                            // Pointer to input samples array for Execute function
     unsigned int n,                         // Number of input samples to read for Execute function
-    std::vector<std::complex<float>>* X     // Vector to store samples for GetFrameSamps function
+    std::vector<Sample_t>* X                // Vector to store samples for GetFrameSamps function
 ) {
     // Check function signatures
     { SyncTraitsSpecification::Create(createParams, callback, nullptr) } -> std::same_as<typename SyncTraitsSpecification::SynchronizerType>;
@@ -131,7 +134,7 @@ struct SyncTraits<ofdmframesync> {
      * @param n Number of input samples to read
      * @return int Result of the execution
      */
-    static int Execute(SynchronizerType fs, std::complex<float>* x, unsigned int n) 
+    static int Execute(SynchronizerType fs, Sample_t* x, unsigned int n) 
     {
         return ofdmframesync_execute(fs, reinterpret_cast<liquid_float_complex*>(x), n);
     };
@@ -153,7 +156,7 @@ struct SyncTraits<ofdmframesync> {
      * @param fs Pointer to the synchronizer
      * @param X Vector to store the samples on
      */
-    static void GetFrameSamps(SynchronizerType fs, std::vector<std::complex<float>>* X) 
+    static void GetFrameSamps(SynchronizerType fs, std::vector<Sample_t>* X) 
     {
         unsigned int fft_size = ofdmframesync_get_fft_size(fs);
         X->resize(fft_size);
@@ -230,7 +233,7 @@ struct SyncTraits<flexframesync> {
      * @param n Number of input samples to read
      * @return int Result of the execution
      */
-    static int Execute(SynchronizerType fs, std::complex<float>* x, unsigned int n) 
+    static int Execute(SynchronizerType fs, Sample_t* x, unsigned int n) 
     {
         return flexframesync_execute(fs, reinterpret_cast<liquid_float_complex*>(x), n);
     };
@@ -251,7 +254,7 @@ struct SyncTraits<flexframesync> {
      * @param fs Pointer to the synchronizer
      * @param X Vector to store the samples on
      */
-    static void GetFrameSamps(SynchronizerType fs, std::vector<std::complex<float>>* X) 
+    static void GetFrameSamps(SynchronizerType fs, std::vector<Sample_t>* X) 
     {
         X->resize(64);                                           // fixed size for flexframesync
         flexframesync_get_frame_samps(fs, reinterpret_cast<liquid_float_complex*>(X->data()), X->size()); 

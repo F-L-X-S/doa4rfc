@@ -28,7 +28,12 @@ add_library(zmq_if STATIC
 )
 
 # Set include-dirs
-target_include_directories(zmq_if PUBLIC include PUBLIC ${ZeroMQ_INCLUDE_DIR})
+target_include_directories(zmq_if 
+        PUBLIC 
+                include
+                ${PROJECT_INCLUDE_DIR} 
+                ${ZeroMQ_INCLUDE_DIR}
+)
 
 # Set lib-dependencies
 target_link_libraries(zmq_if

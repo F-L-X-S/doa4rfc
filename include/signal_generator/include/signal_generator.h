@@ -19,6 +19,9 @@
 #define SIGNAL_GENERATOR_H
 #include <complex>
 #include <liquid.h>
+#include <doa4rfc.h>
+
+using namespace doa4rfc;
 
 /**
  * @brief Generate a sequence of samples, containing a repeating pattern of the length `symbol_len`, 
@@ -28,7 +31,7 @@
  * @param x Pointer to the output array where the generated sequence will be stored.
  * @param mod_type Modulation type for the symbols.
  */
-void GenerateRepeatingSequence(unsigned int symbol_len, unsigned int symbol_repetitions, std::complex<float>* x, modulation_scheme mod_type);
+void GenerateRepeatingSequence(unsigned int symbol_len, unsigned int symbol_repetitions, Sample_t* x, modulation_scheme mod_type);
 
 /**
  * @brief Generate a sequence of samples by repeating a given symbol pattern.
@@ -38,7 +41,7 @@ void GenerateRepeatingSequence(unsigned int symbol_len, unsigned int symbol_repe
  * @param symbol_repetitions Number of times the symbol pattern should be repeated.
  * @param x Pointer to the output array where the generated sequence will be stored.
  */
-void GenerateRepeatingSequence(std::complex<float>* symbol, unsigned int symbol_len, unsigned int symbol_repetitions, std::complex<float>* x);
+void GenerateRepeatingSequence(Sample_t* symbol, unsigned int symbol_len, unsigned int symbol_repetitions, Sample_t* x);
   
 
 /**
@@ -49,7 +52,7 @@ void GenerateRepeatingSequence(std::complex<float>* symbol, unsigned int symbol_
  * @param seq_start Startng-position in the longer sequence where the shorter sequence will be inserted
  * @param seq_len Length of the shorter sequence
  */
-void InsertSequence(std::complex<float>* long_sequence, std::complex<float>* short_sequence, unsigned int seq_start, unsigned int seq_len);
+void InsertSequence(Sample_t* long_sequence, Sample_t* short_sequence, unsigned int seq_start, unsigned int seq_len);
 
 /**
  * @brief Add noise to a sequence of complex samples.
@@ -58,6 +61,6 @@ void InsertSequence(std::complex<float>* long_sequence, std::complex<float>* sho
  * @param sequence_len Length of the sequence.
  * @param SNRdB Signal-to-noise ratio in decibels.
  */
-void AddNoise(std::complex<float>* sequence, unsigned int sequence_len, float SNRdB);
+void AddNoise(Sample_t* sequence, unsigned int sequence_len, float SNRdB);
 
 #endif // SIGNAL_GENERATOR_H

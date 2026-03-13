@@ -120,7 +120,7 @@ public:
      * @param num_samples number of input samples to process
      */
     void Execute(unsigned int           channel_id,
-                std::vector<std::complex<float>>* x)
+                std::vector<Sample_t>* x)
                 {   
                     // Apply constant phase offset 
                     nco_crcf_mix_block_up(nco_[channel_id],
@@ -160,7 +160,7 @@ public:
      * @param X Vector to store the Samples on
      */
     void GetFrameSamps(unsigned int                         channel_id, 
-                std::vector<std::complex<float>>*    X)
+                std::vector<Sample_t>*    X)
                 {
                     synchronizer_interface::GetFrameSamps(framesync_[channel_id], X);
                 };

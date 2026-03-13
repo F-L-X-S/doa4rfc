@@ -13,7 +13,7 @@ add_library(uhd_if STATIC
 )
 
 # Set include-dirs
-target_include_directories(uhd_if PUBLIC include)
+target_include_directories(uhd_if PUBLIC include ${PROJECT_INCLUDE_DIR})
 
 # Set lib-dependencies
 target_link_libraries(uhd_if PUBLIC ${UHD_LIBRARIES} ${Boost_LIBRARIES} sync_worker)

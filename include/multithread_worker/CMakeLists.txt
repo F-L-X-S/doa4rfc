@@ -9,4 +9,4 @@ add_library(multithread_worker STATIC
 )
 
 # Set include-dirs
-target_include_directories(multithread_worker PUBLIC include)
+target_include_directories(multithread_worker PUBLIC include ${PROJECT_INCLUDE_DIR})
