@@ -13,12 +13,10 @@
 #include "zmq_if.h"
 #include <cstring>
 
-using namespace zmq_socket_types;
-
 ZmqSender::ZmqSender(const std::string& endpoint)
     : context_(1), socket_(context_, zmq::socket_type::push)
 {
-    socket_.bind(endpoint);  // e.g. "tcp://*:5555"
+    socket_.connect(endpoint);  // e.g. "tcp://*:5555"
 }
 
 /**
@@ -26,9 +24,9 @@ ZmqSender::ZmqSender(const std::string& endpoint)
  * 
  * @param data 1-D vector [samplesPerChannel]
  */
-void ZmqSender::send(const SampleBatch_t& data)
+void ZmqSender::send(const Samples_1dim_t& data)
 {
-    MultiMeasurementSampleBatch_t wrappedData(1); 
+    Samples_3dim_t wrappedData(1); 
     wrappedData[0].resize(1);  
     wrappedData[0][0] = data;  
     send(wrappedData);
@@ -39,9 +37,9 @@ void ZmqSender::send(const SampleBatch_t& data)
  * 
  * @param data 2-D vector [numChannels, samplesPerChannel]
  */
-void ZmqSender::send(const MultiChannelSampleBatch_t& data)
+void ZmqSender::send(const Samples_2dim_t& data)
 {
-    MultiMeasurementSampleBatch_t wrappedData(1, data);
+    Samples_3dim_t wrappedData(1, data);
     send(wrappedData);
 }
 
@@ -50,7 +48,7 @@ void ZmqSender::send(const MultiChannelSampleBatch_t& data)
  * 
  * @param data 3-D vector [numMeasurements, numChannels, samplesPerChannel]
  */
-void ZmqSender::send(const MultiMeasurementSampleBatch_t& data)
+void ZmqSender::send(const Samples_3dim_t& data)
 {
     const uint32_t numMeasurements = data.size();
     const uint32_t numChannels = data[0].size();
@@ -86,60 +84,52 @@ void ZmqSender::send(const MultiMeasurementSampleBatch_t& data)
 
 
 ZmqReceiver::ZmqReceiver(const std::string& endpoint)
-    : context_(1), socket_(context_, zmq::socket_type::pull)  // ← PULL für Receiver!
+    : context_(1), socket_(context_, zmq::socket_type::pull) 
 {
     socket_.bind(endpoint);  // e.g. "tcp://*:5555"
 }
 
 /**
- * @brief Receive batch of samples from a single channel
+ * @brief Receive batches of samples from multiple channels for multiple measurements
  * 
- * @return 1-D vector [samplesPerChannel]
+ * @return 3-D vector [numMeasurements ,numChannels, samplesPerChannel]
  */
-SampleBatch_t ZmqReceiver::receive()
-{
-    auto data = receiveMultiChannel();  // [1, samplesPerChannel]
-    return data[0];                  // Unwrap
-}
-
-/**
- * @brief Receive batches of samples from multiple channels
- * 
- * @return 2-D vector [numChannels, samplesPerChannel]
- */
-MultiChannelSampleBatch_t ZmqReceiver::receiveMultiChannel()
+Samples_3dim_t ZmqReceiver::receive()
 {
     // Receive raw message
     zmq::message_t message;
     if (!socket_.recv(message, zmq::recv_flags::dontwait)) {
-        return MultiChannelSampleBatch_t{}; // No message received
+        return Samples_3dim_t{}; // No message received
     }
 
-    // Parse Header:  × uint32_t
-    if (message.size() < sizeof(uint32_t) * 2) {
+    // Parse Header: 3 × uint32_t [numMeasurements, numChannels, samplesPerChannel]
+    if (message.size() < sizeof(uint32_t) * 3) {
         throw std::runtime_error("Invalid ZMQ message: too short for header");
     }
 
     const uint8_t* ptr = static_cast<const uint8_t*>(message.data());
-    uint32_t numChannels, samplesPerChannel;
+    uint32_t numMeasurements, numChannels, samplesPerChannel;
 
-    std::memcpy(&numChannels, ptr, sizeof(uint32_t));     ptr += sizeof(uint32_t);
-    std::memcpy(&samplesPerChannel, ptr, sizeof(uint32_t)); ptr += sizeof(uint32_t);
+    std::memcpy(&numMeasurements, ptr, sizeof(uint32_t));   ptr += sizeof(uint32_t);
+    std::memcpy(&numChannels, ptr, sizeof(uint32_t));        ptr += sizeof(uint32_t);
+    std::memcpy(&samplesPerChannel, ptr, sizeof(uint32_t));  ptr += sizeof(uint32_t);
 
     // Validate expected size
-    const size_t expectedSize = sizeof(uint32_t) * 2 + 
-                               numChannels * samplesPerChannel * sizeof(Sample_t);
+    const size_t expectedSize = sizeof(uint32_t) * 3 +
+                               numMeasurements * numChannels * samplesPerChannel * sizeof(Sample_t);
     if (message.size() != expectedSize) {
         throw std::runtime_error("Invalid ZMQ message: size mismatch");
     }
 
-    // Allocate result
-    MultiChannelSampleBatch_t result(numChannels);
-    for (auto& channel : result) {
-        channel.resize(samplesPerChannel);
-        std::memcpy(channel.data(), ptr, samplesPerChannel * sizeof(Sample_t));
-        ptr += samplesPerChannel * sizeof(Sample_t);
+    // Allocate result [numMeasurements, numChannels, samplesPerChannel]
+    Samples_3dim_t result(numMeasurements, Samples_2dim_t(numChannels, Samples_1dim_t(samplesPerChannel)));
+    for (auto& measurement : result) {
+        for (auto& channel : measurement) {
+            std::memcpy(channel.data(), ptr, samplesPerChannel * sizeof(Sample_t));
+            ptr += samplesPerChannel * sizeof(Sample_t);
+        }
     }
 
     return result;
+
 }

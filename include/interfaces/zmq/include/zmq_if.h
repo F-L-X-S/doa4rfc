@@ -30,21 +30,14 @@
 #include <sync_worker.h>
 #include <multithread_worker.h>
 
-namespace zmq_socket_types {
-    using Sample_t = std::complex<float>;
-    using SampleBatch_t = std::vector<Sample_t>;
-    using MultiChannelSampleBatch_t = std::vector<SampleBatch_t>;
-    using MultiMeasurementSampleBatch_t = std::vector<MultiChannelSampleBatch_t>;
-}
-
-using namespace zmq_socket_types;
+ using namespace sync_worker_types;
 
 class ZmqSender {
 public:
     ZmqSender(const std::string& endpoint);
-    void send(const SampleBatch_t& data);
-    void send(const MultiChannelSampleBatch_t& data);
-    void send(const MultiMeasurementSampleBatch_t& data);
+    void send(const Samples_1dim_t& data);
+    void send(const Samples_2dim_t& data);
+    void send(const Samples_3dim_t& data);
 
 private:
     zmq::context_t context_;
@@ -54,9 +47,8 @@ private:
 class ZmqReceiver {
 public:
     ZmqReceiver(const std::string& endpoint);
-    SampleBatch_t receive();
-    MultiChannelSampleBatch_t receiveMultiChannel();
-    
+    Samples_3dim_t receive();
+
 private:
     zmq::context_t context_;
     zmq::socket_t socket_;
@@ -104,18 +96,20 @@ class ZmqRxWorker: public MultithreadWorker{
 
             while (!stop_signal_called->load()) {
                 // Receive samples from ZMQ socket
-                zmq_socket_types::MultiChannelSampleBatch_t received_samples = receiver_.receiveMultiChannel();
-                if (received_samples.empty()) continue;
+                Samples_3dim_t received = receiver_.receive();
+                if (received.empty()) continue;
 
                 // Placeholder timestamp
                 uint16_t timestamp = static_cast<uint16_t>(std::chrono::steady_clock::now().time_since_epoch().count() % 65536);
 
-                // Push received samples to corresponding channel queues
-                for (unsigned int i = 0; i < num_channels; ++i) {
-                    SampleBlock_t sample_block;
-                    sample_block.samples = std::move(received_samples[i]); // Assuming received_samples contains samples for all channels
-                    sample_block.timestamp = timestamp;
-                    PushItemToQueue<SampleBlock_t>(rx_queues_.at(i), std::move(sample_block));
+                // Push each measurement's per-channel samples into the corresponding rx queues
+                for (const auto& measurement : received) {
+                    for (unsigned int i = 0; i < num_channels; ++i) {
+                        SampleBlock_t sample_block;
+                        sample_block.samples = measurement[i];
+                        sample_block.timestamp = timestamp;
+                        PushItemToQueue<SampleBlock_t>(rx_queues_.at(i), std::move(sample_block));
+                    }
                 }
             }
         };
@@ -176,9 +170,9 @@ class ZmqTxWorker: public MultithreadWorker{
                 if (num_popped == 0) continue;
 
                 // Send item via ZMQ
-                if constexpr (std::is_same_v<tx_item_t, SampleBatch_t> || 
-                    std::is_same_v<tx_item_t, MultiChannelSampleBatch_t> ||
-                    std::is_same_v<tx_item_t, MultiMeasurementSampleBatch_t>) {
+                if constexpr (std::is_same_v<tx_item_t, Samples_1dim_t> || 
+                    std::is_same_v<tx_item_t, Samples_2dim_t> ||
+                    std::is_same_v<tx_item_t, Samples_3dim_t>) {
                     for (auto& item : buffer) {
                         sender_.send(item);  
                     }
