@@ -10,11 +10,7 @@
  */
 
 #ifndef SYNCWORKER_H
-#define SYNCWORKER_H
-
-
-#include <vector>                     
-#include <complex>      
+#define SYNCWORKER_H     
 
 #include <queue>       
 #include <mutex>                    
@@ -27,121 +23,106 @@
 #include <boost/thread.hpp>
 #include <iostream>
 
+#include <doa4rfc.h>
 #include <multithread_worker.h>
 #include <multisync.h>
 
-/**
- * @brief Single Sample Type
- * 
- */
-using Sample_t = std::complex<float>;                   // Received samples type
+using namespace doa4rfc;
 
-/**
- * @brief Detected Symbol type
- * 
- */
-using Symbol_t = std::complex<float>;                   // Detected Symbol type
+namespace sync_worker_types {
+    /**
+     * @brief Block of samples with timestamp
+     * 
+     */
+    struct SampleBlock_t
+    {
+        Samples_1dim_t samples;                      // Received samples
+        uint64_t timestamp;                          // Global Nano-Second-Timestamp
+    };
 
-/**
- * @brief Block of samples with timestamp
- * 
- */
-struct SampleBlock_t
-{
-    std::vector<Sample_t> samples;                      // Received samples
-    uint64_t timestamp;                                 // Global Nano-Second-Timestamp
-};
+    /**
+     * @brief Thread-Safe Queue structure for sample blocks
+     * 
+     */
+    using SampleBlockQueue_t = ThreadSafeQueue<SampleBlock_t>;
 
-/**
- * @brief Thread-Safe Queue structure for sample blocks
- * 
- */
-using SampleBlockQueue_t = ThreadSafeQueue<SampleBlock_t>;
+    /**
+     * @brief Block of symbols with timestamp
+     * 
+     */
+    struct SymbolBlock_t
+    {
+        Symbols_1dim_t symbols;                      // Received symbols
+        uint64_t timestamp;                          // Global Nano-Second-Timestamp
+    };
 
-/**
- * @brief Block of symbols with timestamp
- * 
- */
-struct SymbolBlock_t
-{
-    std::vector<Symbol_t> symbols;                      // Received symbols
-    uint64_t timestamp;                                 // Global Nano-Second-Timestamp
-};
-
-/**
- * @brief Thread-Safe Queue structure for symbol blocks
- * 
- */
-using SymbolBlockQueue_t = ThreadSafeQueue<SymbolBlock_t>;
+    /**
+     * @brief Thread-Safe Queue structure for symbol blocks
+     * 
+     */
+    using SymbolBlockQueue_t = ThreadSafeQueue<SymbolBlock_t>;
 
 
 
-/**
- * @brief Sample-Block belonging to one frame 
- * 
- */
-struct FrameSamps_t: public SampleBlock_t {
-    unsigned int channel;                               // Channel index
-};
+    /**
+     * @brief Sample-Block belonging to one frame 
+     * 
+     */
+    struct FrameSamps_t: public SampleBlock_t {
+        unsigned int channel;                               // Channel index
+    };
 
-/**
- * @brief Thread-Safe Queue structure for Frame Samples
- * 
- */
-using FrameSampsQueue_t = ThreadSafeQueue<FrameSamps_t>;
+    /**
+     * @brief Thread-Safe Queue structure for Frame Samples
+     * 
+     */
+    using FrameSampsQueue_t = ThreadSafeQueue<FrameSamps_t>;
 
-/**
- * @brief Symbol-Block belonging to one frame 
- * 
- */
-struct FrameSyms_t: public SymbolBlock_t {
-    unsigned int channel;                               // Channel index
-};
+    /**
+     * @brief Symbol-Block belonging to one frame 
+     * 
+     */
+    struct FrameSyms_t: public SymbolBlock_t {
+        unsigned int channel;                               // Channel index
+    };
 
-/**
- * @brief Thread-Safe Queue structure for Frame Symbols
- * 
- */
-using FrameSymsQueue_t = ThreadSafeQueue<FrameSyms_t>;
+    /**
+     * @brief Thread-Safe Queue structure for Frame Symbols
+     * 
+     */
+    using FrameSymsQueue_t = ThreadSafeQueue<FrameSyms_t>;
 
-/**
- * @brief Samples of all channels belonging to one frame 
- * 
- */
-using  MultiChFrameSamps_t = std::vector<std::vector<Sample_t>>;
+    /**
+     * @brief Thread-Safe Queue structure for Samples of all channels belonging to one frame 
+     * 
+     */
+    using MultiChFrameSampsQueue_t = ThreadSafeQueue<Samples_2dim_t>;
 
-/**
- * @brief Thread-Safe Queue structure for Frame Samples
- * 
- */
-using MultiChFrameSampsQueue_t = ThreadSafeQueue<MultiChFrameSamps_t>;
+    /**
+     * @brief Thread-Safe Queue structure for Symbols of all channels belonging to one frame 
+     * 
+     */
+    using MultiChFrameSymsQueue_t = ThreadSafeQueue<Symbols_2dim_t>;
 
-/**
- * @brief Symbols of all channels belonging to one frame 
- * 
- */
-using MultiChFrameSyms_t = std::vector<std::vector<Symbol_t>>;         
+    /**
+     * @brief Phase correction structure to store phase adjustments for NCOs
+     * 
+     */
+    struct Phase_t {
+        float phi;               // Phase data
+        unsigned int channel;    // Channel index
+    };
 
-/**
- * @brief Thread-Safe Queue structure for Frame Symbols
- * 
- */
-using MultiChFrameSymsQueue_t = ThreadSafeQueue<MultiChFrameSyms_t>;
+    /**
+     * @brief Thread-Safe Queue structure for Phase correction values 
+     * 
+     */
+    using PhaseQueue_t = ThreadSafeQueue<Phase_t>;
 
-/**
- * @brief Phase correction structure to store phase adjustments for NCOs
- * 
- */
-struct Phase_t {
-    float phi;               // Phase data
-    unsigned int channel;    // Channel index
-};
+} // namespace sync_worker_types
 
-/**
- * @brief Thread-Safe Queue structure for Phase correction values 
- * 
- */
-using PhaseQueue_t = ThreadSafeQueue<Phase_t>;
+ using namespace sync_worker_types;
+
 
 /**
  * @brief The SyncWorker function continuously retrieves timestamped sample-blocks from the channel-specific queues and 
@@ -170,8 +151,9 @@ class SyncWorker: public MultithreadWorker {
                         MultithreadWorker(stop_signal_ref),
                         ms_(num_channels, synchronizer_params, reinterpret_cast<Callback_t>(callback), &userdata_) {
                             frame_samps_queue_ = nullptr;
-                            frame_syms_queue_ = nullptr; 
-                            cb_data_.ms_ptr = &ms_; 
+                            frame_syms_queue_ = nullptr;
+                            userdata_ = &cb_data_;
+                            cb_data_.ms_ptr = &ms_;
                             AddWorkerQueue<PhaseQueue_t>(&phi_corr_queue_);         // Add Phase-Corr Queue to Worker
 
                             for (unsigned int i = 0; i < num_channels; ++i){
@@ -302,22 +284,22 @@ class SyncWorker: public MultithreadWorker {
         };
 
         /**
-         * @brief Callback-data buffer shared by each channel-synchronizers callback-function 
-         * 
+         * @brief Internal MultiSync instance
+         *
+         */
+        MultiSync<synchronizer_iface> ms_;
+
+        /**
+         * @brief Callback-data buffer shared by each channel-synchronizers callback-function
+         *
          */
         CallbackData_t cb_data_;
 
         /**
-         * @brief Array of pointers to Callback-data
-         * 
+         * @brief Userdata pointer passed to MultiSync (void**); set to &cb_data_ after construction
+         *
          */
         void* userdata_;
-
-        /**
-         * @brief Internal MultiSync instance
-         * 
-         */
-        MultiSync<synchronizer_iface> ms_;
 
         /**
          * @brief Vector of frame sample blocks detected in the last Execute cycle
@@ -387,7 +369,7 @@ class SyncWorker: public MultithreadWorker {
         };
 
         /**
-         * @brief ofdmframesync callback function to push received symbols from synchronizer to the cb-data-queue
+         * @brief Callback function to push received symbols from synchronizer to the cb-data-queue
          * 
          * @param _X array of received subcarrier samples [size: _M x 1]
          * @param _p subcarrier allocation array [size: _M x 1]
@@ -395,7 +377,7 @@ class SyncWorker: public MultithreadWorker {
          * @param _cb_data pointer to internal cb-data structure
          * @return return 1 to reset synchronizer after first data symbol
          */
-        static int callback(std::complex<float>* _X, unsigned char * _p, unsigned int _M, void * _cb_data){
+        static int callback(Sample_t* _X, unsigned char * _p, unsigned int _M, void * _cb_data){
             // Set detected frame indicator
             CallbackData_t& cb = *static_cast<CallbackData_t*>(_cb_data);
             cb.frame_detected = true;
