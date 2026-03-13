@@ -74,29 +74,6 @@ class MultithreadWorker {
          */
         void StopWorker();
 
-    protected:
-        /**
-         * @brief External stop signal to terminate the threads
-         * 
-         */
-        std::atomic<bool>* stop_signal_called;
-
-        /**
-         * @brief Execute function to be implemented by derived worker classes
-         * 
-         */
-        virtual void Execute() = 0;
-
-        /**
-         * @brief Add queue to the worker
-         * 
-         * @param queue Pointer to the thread-safe queue to add
-         */
-        template <typename T>
-        void AddWorkerQueue(detail::ThreadSafeQueueBase* queue) {
-            queues_.push_back(static_cast<detail::ThreadSafeQueueBase*>(queue));
-        };
-
         /**
          * @brief Push item to the specified thread-safe queue
          * 
@@ -197,6 +174,29 @@ class MultithreadWorker {
                     ++popped;
                 }
                 return popped;
+        };
+
+    protected:
+        /**
+         * @brief External stop signal to terminate the threads
+         * 
+         */
+        std::atomic<bool>* stop_signal_called;
+
+        /**
+         * @brief Execute function to be implemented by derived worker classes
+         * 
+         */
+        virtual void Execute() = 0;
+
+        /**
+         * @brief Add queue to the worker
+         * 
+         * @param queue Pointer to the thread-safe queue to add
+         */
+        template <typename T>
+        void AddWorkerQueue(detail::ThreadSafeQueueBase* queue) {
+            queues_.push_back(static_cast<detail::ThreadSafeQueueBase*>(queue));
         };
 
     private:
