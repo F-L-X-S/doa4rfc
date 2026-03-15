@@ -34,6 +34,9 @@
 #include <liquid.h>
 #include <synctraits.h>
 
+#define DATA_WRITTEN 1
+#define INDEX_OUT_OF_BOUND 0
+
 /**
  * @brief Abstract MultiSync class to handle multiple instances of generic frame synchronizers. 
  * Enables simultaneous processing of oncoming samples by multiple synchronizers.
@@ -48,40 +51,33 @@ public:
 
     /**
      * @brief Parameters to create an instance of the chosen synchronizer type
-     * 
+     *
      */
-    using ParamsType   = typename synchronizer_interface::CreateParams;
-
-    /**
-     * @brief Callback function type used by the chosen synchronizer type
-     * 
-     */
-    using CallbackType = typename synchronizer_interface::CallbackType;
+    using CreateParams_t   = typename synchronizer_interface::CreateParams_t;
 
 
     /**
      * @brief Construct a new MultiSync object with the specified number of channels and given synchronizer parameters.
      * Synchronizers will call the user-defined callback function with the user-defined data structure when receiving a frame.
-     * 
-     * @param _num_channels number of channels
-     * @param _synchronizer_params synchronizer parameters
-     * @param _userdata user-defined data structure array
-     * @param _callback user-defined callback function
+     *
+     * @param num_channels number of channels
+     * @param synchronizer_params synchronizer parameters
+     * @param handler generic callback handler invoked on frame detection
+     * @param userdata user-defined data passed to handler
      */
     MultiSync(unsigned int           num_channels,
-            const ParamsType&        synchronizer_params, 
-            CallbackType             callback,
-            void **                  userdata):
-            num_channels_(num_channels), userdata_(userdata), callback_(callback)
+            const CreateParams_t&    synchronizer_params,
+            GenericCallback_t        handler,
+            void *                   userdata):
+            num_channels_(num_channels), cb_wrapper_{handler, userdata}
             {
                 // create synchronizer instances for all channels
                 framesync_ = new synchronizer_interface::SynchronizerType[num_channels_];
                 // create NCO instances for all channels
                 nco_ = new nco_crcf[num_channels_];
-                // initialize NCO and synchronizer instances 
+                // initialize NCO and synchronizer instances
                 for (unsigned int i=0; i<num_channels; i++) {
-                    userdata_[i]  = userdata[i];
-                    framesync_[i] = synchronizer_interface::Create(synchronizer_params, callback_, userdata_[i]);
+                    framesync_[i] = synchronizer_interface::Create(synchronizer_params, &cb_wrapper_);
                     nco_[i] = nco_crcf_create(LIQUID_VCO);
                 }
             }
@@ -156,15 +152,43 @@ public:
     /**
      * @brief Get the samples of the last frame of the specified channel
      * 
+     * The function is called within the user defined callback function 
+     * 
      * @param channel_id Channel-ID
      * @param X Vector to store the Samples on
      */
-    void GetFrameSamps(unsigned int                         channel_id, 
-                std::vector<Sample_t>*    X)
-                {
-                    synchronizer_interface::GetFrameSamps(framesync_[channel_id], X);
-                };
+    void GetFrameSamps(unsigned int       channel_id,
+                std::vector<Sample_t>*    X){
+        unsigned int i = 0;
+        unsigned int ret_val = 1;
+        Sample_t s;
+        while (ret_val != 0) {
+            ret_val = synchronizer_interface::GetFrameSamp(framesync_[channel_id], &s, i);
+            if (ret_val == 1) X->push_back(s);   // Store Sample 
+            i++;                                 // Continue with next buffer position 
+        };
+    };
 
+    
+    /**
+     * @brief Get the symbols of the last frame of the specified channel
+     * 
+     * The function is called within the user defined callback function 
+     * 
+     * @param channel_id Channel-ID
+     * @param X Vector to store the Symbols on
+     */
+    void GetFrameSyms(unsigned int channel_id,
+                std::vector<Symbol_t>*    X){
+        unsigned int i = 0;
+        unsigned int ret_val = 1;
+        Symbol_t s;
+        while (ret_val != 0) {
+            ret_val = synchronizer_interface::GetFrameSym(framesync_[channel_id], &s, i);
+            if (ret_val == 1) X->push_back(s);   // Store Sample 
+            i++;                                 // Continue with next buffer position 
+        };
+    };            
 
 private:
     /**
@@ -188,21 +212,15 @@ private:
 
     /**
      * @brief Synchronizer initialization parameters
-     * 
+     *
      */
-    ParamsType params_;
+    CreateParams_t params_;
 
     /**
-     * @brief Pointer to user-defined data structure array
-     * 
+     * @brief Callback wrapper storing the generic handler and real userdata.
+     * Passed to each synchronizer instance as userdata.
      */
-    void ** userdata_;               
-
-    /**
-     * @brief Callback function to call when a frame is detected by a synchronizer
-     * 
-     */
-    CallbackType callback_;  
+    CallbackWrapper cb_wrapper_;
 
 };
 

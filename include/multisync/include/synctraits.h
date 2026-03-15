@@ -32,28 +32,44 @@
 using namespace doa4rfc;
 
 /**
+ * @brief Generic handler function type for synchronizer callbacks.
+ * SyncTraits specializations forward the C callback to this generic handler via CallbackWrapper.
+ */
+using GenericCallback_t = int(*)(void*);
+
+/**
+ * @brief Wrapper struct stored as userdata in liquid-dsp synchronizers.
+ * The SyncTraits C callback extracts this wrapper and calls the generic handler.
+ */
+struct CallbackWrapper {
+    GenericCallback_t handler;   // generic handler (e.g. SyncWorker::callback)
+    void* userdata;              // real userdata (e.g. SyncWorker::cb_data_)
+};
+
+/**
  * @brief Concept to check that the SyncTraits Template-specialization provides the required interface for MultiSync.
- * SyncTraits-Template specializations define a standard interface for different Liquid-DSP synchronizer types. 
- * 
+ * SyncTraits-Template specializations define a standard interface for different Liquid-DSP synchronizer types.
+ *
  * @tparam SyncTraitsSpecification SyncTraits specialization to check
  */
 template<typename SyncTraitsSpecification>
 concept SyncTraitsConcept = requires(
     // local variables to check function signatures and typedefinitions
     typename SyncTraitsSpecification::SynchronizerType synchronizer,            // Frame Synchronizer
-    typename SyncTraitsSpecification::CallbackType callback,                    // Callback function 
-    typename SyncTraitsSpecification::CreateParams createParams,                // Parameters for synchronizer create function
+    typename SyncTraitsSpecification::CreateParams_t createParams,              // Parameters for synchronizer create function
 
-    Sample_t* x,                            // Pointer to input samples array for Execute function
     unsigned int n,                         // Number of input samples to read for Execute function
-    std::vector<Sample_t>* X                // Vector to store samples for GetFrameSamps function
+    Sample_t* x,                            // Pointer to store samples on for GetFrameSamp and Execute function
+    Symbol_t* y,                            // Pointer to store samples on for GetFrameSym function
+    unsigned int pos                        // Position Index to read from in GetFrameSamp / GetFrameSym function
 ) {
     // Check function signatures
-    { SyncTraitsSpecification::Create(createParams, callback, nullptr) } -> std::same_as<typename SyncTraitsSpecification::SynchronizerType>;
+    { SyncTraitsSpecification::Create(createParams, (CallbackWrapper*)nullptr) } -> std::same_as<typename SyncTraitsSpecification::SynchronizerType>;
     { SyncTraitsSpecification::Reset(synchronizer) } -> std::same_as<void>;
     { SyncTraitsSpecification::Execute(synchronizer, x, n) } -> std::same_as<int>;
     { SyncTraitsSpecification::Destroy(synchronizer) } -> std::same_as<void>;
-    { SyncTraitsSpecification::GetFrameSamps(synchronizer, X) } -> std::same_as<void>;
+    { SyncTraitsSpecification::GetFrameSamp(synchronizer, x, pos) } -> std::same_as<unsigned int>;
+    { SyncTraitsSpecification::GetFrameSym(synchronizer, y, pos) } -> std::same_as<unsigned int>;
 };
 
 /**
@@ -87,16 +103,10 @@ struct SyncTraits<ofdmframesync> {
     using SynchronizerType = ofdmframesync;
 
     /**
-     * @brief Define the type of the callback function used in the OFDM frame synchronizer
-     * 
-     */
-    using CallbackType = ofdmframesync_callback;
-
-    /**
      * @brief Define the Parameters for the OFDM frame synchronizer Create function
      * 
      */
-    struct CreateParams {
+    struct CreateParams_t {
         unsigned int M;           // number of subcarriers
         unsigned int cp_len;      // cyclic prefix length
         unsigned int taper_len;   // taper length
@@ -104,16 +114,26 @@ struct SyncTraits<ofdmframesync> {
     };
 
     /**
+     * @brief C-compatible callback matching ofdmframesync_callback signature.
+     * Extracts CallbackWrapper from userdata and forwards to generic handler.
+     */
+    static int Callback(liquid_float_complex * _X, unsigned char * _p,
+                         unsigned int _M, void * _userdata)
+    {
+        auto* w = static_cast<CallbackWrapper*>(_userdata);
+        return w->handler(w->userdata);
+    };
+
+    /**
      * @brief Wrapper function to create an OFDM frame synchronizer
-     * 
+     *
      * @param params Synchronizer parameters
-     * @param callback Callback function
-     * @param userdata User-defined data structure
+     * @param wrapper CallbackWrapper containing generic handler and real userdata
      * @return SynchronizerType Created synchronizer instance
      */
-    static SynchronizerType Create(const CreateParams& params, ofdmframesync_callback callback, void* userdata) 
+    static SynchronizerType Create(const CreateParams_t& params, CallbackWrapper* wrapper)
     {
-        return ofdmframesync_create(params.M, params.cp_len, params.taper_len, params.p, callback, userdata);
+        return ofdmframesync_create(params.M, params.cp_len, params.taper_len, params.p, Callback, wrapper);
     };
 
     /**
@@ -150,17 +170,34 @@ struct SyncTraits<ofdmframesync> {
     };
 
     /**
-     * @brief Wrapper function to get samples of the last frame received by the OFDM frame synchronizer.
-     * Here the CFR (Channel Frequency Response is used insted of time-domain samples) (no difference in correlation matrix). 
+     * @brief Wrapper function to get sample of the last frame received by the frame synchronizer.
+     * Here the CFR (Channel Frequency Response is used insted of time-domain samples) (frequency correlation equals timedomain correlation). 
+     * 
+     * The function is called within the user defined callback function 
      * 
      * @param fs Pointer to the synchronizer
-     * @param X Vector to store the samples on
+     * @param _x buffer to store the sample on 
+     * @param _pos Index of buffer position to read
      */
-    static void GetFrameSamps(SynchronizerType fs, std::vector<Sample_t>* X) 
+    static unsigned int GetFrameSamp(SynchronizerType fs, Sample_t* _x, unsigned int _pos) 
     {
-        unsigned int fft_size = ofdmframesync_get_fft_size(fs);
-        X->resize(fft_size);
-        ofdmframesync_get_cfr(fs, reinterpret_cast<liquid_float_complex*>(X->data()), fft_size);
+        liquid_float_complex* _x_liquid = liquid_conv::Ptr(_x);
+        return ofdmframesync_get_cfr(fs, _x_liquid, _pos);
+    };
+
+    /**
+     * @brief Wrapper function to get symbol of the last frame received by the frame synchronizer. 
+     * 
+     * The function is called within the user defined callback function 
+     * 
+     * @param fs Pointer to the synchronizer
+     * @param _x buffer to store the symbol on 
+     * @param _pos Index of buffer position to read
+     */
+    static unsigned int GetFrameSym(SynchronizerType fs, Symbol_t* _x, unsigned int _pos) 
+    {
+        liquid_float_complex* _x_liquid = liquid_conv::Ptr(_x);
+        return ofdmframesync_get_sym(fs, _x_liquid, _pos);
     };
 };
 
@@ -189,30 +226,39 @@ struct SyncTraits<flexframesync> {
     using SynchronizerType = flexframesync;
 
     /**
-     * @brief Define the type of the callback function used in the frame synchronizer
-     * 
-     */
-    using CallbackType = framesync_callback;
-
-    /**
      * @brief Define the Parameters for the frame synchronizer Create function
      * 
      */
-    struct CreateParams {
+    struct CreateParams_t {
 
     };
 
     /**
+     * @brief C-compatible callback matching framesync_callback signature.
+     * Extracts CallbackWrapper from userdata and forwards to generic handler.
+     */
+    static int Callback(unsigned char *  _header,
+                        int              _header_valid,
+                        unsigned char *  _payload,
+                        unsigned int     _payload_len,
+                        int              _payload_valid,
+                        framesyncstats_s _stats,
+                        void *           _userdata)
+    {
+        auto* w = static_cast<CallbackWrapper*>(_userdata);
+        return w->handler(w->userdata);
+    };
+
+    /**
      * @brief Wrapper function to create a frame synchronizer
-     * 
+     *
      * @param params Synchronizer parameters
-     * @param callback Callback function
-     * @param userdata User-defined data structure
+     * @param wrapper CallbackWrapper containing generic handler and real userdata
      * @return SynchronizerType Created synchronizer instance
      */
-    static SynchronizerType Create(const CreateParams& params, CallbackType callback, void* userdata) 
+    static SynchronizerType Create(const CreateParams_t& params, CallbackWrapper* wrapper)
     {
-        return flexframesync_create(callback, userdata);
+        return flexframesync_create(Callback, wrapper);
     };
 
     /**
@@ -249,15 +295,33 @@ struct SyncTraits<flexframesync> {
     };
 
     /**
-     * @brief Wrapper function to get samples of the last frame received by the frame synchronizer
+     * @brief Wrapper function to get sample of the last frame received by the frame synchronizer.
+     * 
+     * The function is called within the user defined callback function 
      * 
      * @param fs Pointer to the synchronizer
-     * @param X Vector to store the samples on
+     * @param _x buffer to store the sample on 
+     * @param _pos Index of buffer position to read
      */
-    static void GetFrameSamps(SynchronizerType fs, std::vector<Sample_t>* X) 
+    static unsigned int GetFrameSamp(SynchronizerType fs, Sample_t* _x, unsigned int _pos) 
     {
-        X->resize(64);                                           // fixed size for flexframesync
-        flexframesync_get_frame_samps(fs, reinterpret_cast<liquid_float_complex*>(X->data()), X->size()); 
+        liquid_float_complex* _x_liquid = liquid_conv::Ptr(_x);
+        return flexframesync_get_frame_samp(fs, _x_liquid, _pos);
+    };
+
+    /**
+     * @brief Wrapper function to get symbol of the last frame received by the frame synchronizer. 
+     * 
+     * The function is called within the user defined callback function 
+     * 
+     * @param fs Pointer to the synchronizer
+     * @param _x buffer to store the symbol on 
+     * @param _pos Index of buffer position to read
+     */
+    static unsigned int GetFrameSym(SynchronizerType fs, Symbol_t* _x, unsigned int _pos) 
+    {
+        liquid_float_complex* _x_liquid = liquid_conv::Ptr(_x);
+        return flexframesync_get_sym(fs, _x_liquid, _pos);
     };
 };
 
