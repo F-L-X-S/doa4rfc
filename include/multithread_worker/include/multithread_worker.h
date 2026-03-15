@@ -107,41 +107,48 @@ class MultithreadWorker {
 
         /**
          * @brief Pop single item from the specified thread-safe queue to the provided buffer
-         * 
+         *
          * @tparam queue_item_t Type of the queue item
          * @param q Reference to the thread-safe queue
          * @param buffer buffer to store the popped item
+         * @param timeout_ms Maximum time to wait for data in milliseconds (0 = non-blocking)
          * @return bool Indicator, if an Item was popped from the queue
          */
         template <typename queue_item_t>
-        bool PopItemFromQueue(ThreadSafeQueue<queue_item_t>& q, queue_item_t& buffer) {
+        bool PopItemFromQueue(ThreadSafeQueue<queue_item_t>& q, queue_item_t& buffer, unsigned int timeout_ms = 100) {
                 std::unique_lock<std::mutex> lock(q.mtx);
-                q.cv.wait_for(lock, std::chrono::milliseconds(100), [&q, this] { 
-                    return !q.queue.empty() || stop_signal_called->load(); 
-                });
+                if (timeout_ms > 0) {
+                    q.cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&q, this] {
+                        return !q.queue.empty() || stop_signal_called->load();
+                    });
+                }
 
                 if (!q.queue.empty()) {
                     buffer = std::move(q.queue.front());
                     q.queue.pop();
                     return true;
                 }
+                return false;
         };
 
         /**
          * @brief Pop batch of items from the specified thread-safe queue to the provided buffer
-         * 
+         *
          * @tparam queue_item_t Type of the queue item
          * @param q Reference to the thread-safe queue
          * @param buffer Vector to store the popped items
          * @param max_items Max. number of items to pop from the queue
+         * @param timeout_ms Maximum time to wait for data in milliseconds (0 = non-blocking)
          * @return size_t Number of items actually popped from the queue
          */
         template <typename queue_item_t>
-        size_t PopItemFromQueue(ThreadSafeQueue<queue_item_t>& q, std::vector<queue_item_t>& buffer, size_t max_items) {
+        size_t PopItemFromQueue(ThreadSafeQueue<queue_item_t>& q, std::vector<queue_item_t>& buffer, size_t max_items, unsigned int timeout_ms = 100) {
                 std::unique_lock<std::mutex> lock(q.mtx);
-                q.cv.wait_for(lock, std::chrono::milliseconds(100), [&q, this] { 
-                    return !q.queue.empty() || stop_signal_called->load(); 
-                });
+                if (timeout_ms > 0) {
+                    q.cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&q, this] {
+                        return !q.queue.empty() || stop_signal_called->load();
+                    });
+                }
 
                 size_t popped = 0;
                 while (popped < max_items && !q.queue.empty()) {
@@ -154,18 +161,21 @@ class MultithreadWorker {
 
         /**
          * @brief Pop all items from the specified thread-safe queue to the provided buffer
-         * 
+         *
          * @tparam queue_item_t Type of the queue item
          * @param q Reference to the thread-safe queue
          * @param buffer Vector to store the popped items
+         * @param timeout_ms Maximum time to wait for data in milliseconds (0 = non-blocking)
          * @return size_t Number of items actually popped from the queue
          */
         template <typename queue_item_t>
-        size_t PopBatchFromQueue(ThreadSafeQueue<queue_item_t>& q, std::vector<queue_item_t>& buffer) {
+        size_t PopBatchFromQueue(ThreadSafeQueue<queue_item_t>& q, std::vector<queue_item_t>& buffer, unsigned int timeout_ms = 100) {
                 std::unique_lock<std::mutex> lock(q.mtx);
-                q.cv.wait_for(lock, std::chrono::milliseconds(100), [&q, this] { 
-                    return !q.queue.empty() || stop_signal_called->load(); 
-                });
+                if (timeout_ms > 0) {
+                    q.cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&q, this] {
+                        return !q.queue.empty() || stop_signal_called->load();
+                    });
+                }
 
                 size_t popped = 0;
                 while (!q.queue.empty()) {
