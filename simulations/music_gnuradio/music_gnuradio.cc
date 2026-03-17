@@ -14,6 +14,7 @@
  #include <liquid.h>
  #include <doa4rfc.h>
  #include <sync_worker.h>
+ #include <grouping_worker.h>
  #include <multithread_worker.h>
  #include <zmq_if.h>
  #include <signal_generator.h>
@@ -84,26 +85,41 @@ int main(int argc, char*argv[])
     #else 
         #error "Synchronizer-Type not supported: Define OFDMFRAME or FLEXFRAME"
     #endif
-    
-    // Add output-queues to sync-worker 
-    sync_worker_queues::FrameSampsQueue_t frame_samps_queue;
-    sync.AddFrameSampsQueue(std::ref(frame_samps_queue));
-    sync_worker_queues::FrameSymsQueue_t frame_syms_queue;
-    sync.AddFrameSymsQueue(std::ref(frame_syms_queue));
 
-    // ---------------------- ZMQ Worker ----------------------
-    // ZMQ-socket for data import (e.g. from Gnuradio)
+    // ---------------------- Grouping Worker ----------------------
+    GroupingWorker grouping_worker(NUM_CHANNELS, 1e6, std::ref(stop_signal_called));   // max_age of 1ms for grouping
+
+    // ---------------------- Queue Connections ----------------------
+    //Scheme:  |tx-worker|->queue->|rx-worker|
+    // 1. get reference to rx-workers internal input queue
+    // 2. add rx-workers input queue as tx-workers output queue
+
+    // tx_queue_external->|zmq_tx_external_worker|
+    ThreadSafeQueue<Samples_2dim_t> tx_queue_external;
+    // ZMQ Worker simulating an external application providing samples (e.g. Gnuradio) 
+    ZmqTxWorker zmq_tx_external_worker(IMPORT_INTERFACE, tx_queue_external, stop_signal_called);    
+
+    // |zmq_rx_worker|--|-->rx_queue[0]--|-->|sync_worker|
+    //                  |-->   ...     --|
+    //                  |-->rx_queue[i]--|
     auto& rx_queues = *sync.GetRxQueues();
+    // ZMQ-socket for data import from external application (e.g. from Gnuradio)
     ZmqRxWorker zmq_rx_worker(IMPORT_INTERFACE, rx_queues, stop_signal_called);
 
-    // ZMQ-socket for simulated data export of simulated baseband samples 
-    // (simulated for testing purposes without gnuradio)
-    ThreadSafeQueue<Samples_2dim_t> tx_queue_gr;
-    ZmqTxWorker zmq_tx_gr_worker(IMPORT_INTERFACE, tx_queue_gr, stop_signal_called);
 
+    // |sync_worker|->frame_samps_queue->|grouping_worker|
+    auto& frame_samps_queue = *grouping_worker.GetFrameSampsQueue();    // Get reference to internal input queue
+    sync.AddFrameSampsQueue(std::ref(frame_samps_queue));               // Add rx workers input queue as tx workers output queue
+    
+    // |sync_worker|->frame_syms_queue->|grouping_worker|
+    auto& frame_syms_queue = *grouping_worker.GetFrameSymsQueue();      // Get reference to internal input queue
+    sync.AddFrameSymsQueue(std::ref(frame_syms_queue));                 // Add rx workers input queue as tx workers output queue
+
+    // |grouping_worker|->multi_ch_frame_samps_queue->|zmq_tx_worker|
     // ZMQ-socket for data export to MUSIC Python-application
     ThreadSafeQueue<Samples_2dim_t> tx_queue;
     ZmqTxWorker zmq_tx_worker(EXPORT_INTERFACE, tx_queue, stop_signal_called);
+    grouping_worker.AddMultiChSampsQueue(std::ref(tx_queue));           // Add tx workers input queue as grouping worker output queue
 
     // ---------------------- Framegeneration ----------------------
     // Framegenerator parameters
@@ -231,22 +247,24 @@ int main(int argc, char*argv[])
 
     // ---------------------- Run Workers ----------------------
     sync.RunWorker();   
-    zmq_tx_gr_worker.RunWorker();
+    grouping_worker.RunWorker();
+    zmq_tx_external_worker.RunWorker();
     zmq_rx_worker.RunWorker();
     zmq_tx_worker.RunWorker();
     std::cout << "Started Workers..." << std::endl;
 
     // Wait 3 sec...
-    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
     // Add generated Frame to queue for transmission to doa4rfc 
-    zmq_tx_gr_worker.PushItemToQueue<Samples_2dim_t>(tx_queue_gr, std::move(rx));
+    zmq_tx_external_worker.PushItemToQueue<Samples_2dim_t>(tx_queue_external, std::move(rx));
     
     // Wait 5 sec...
-    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5000));
 
     sync.StopWorker();
-    zmq_tx_gr_worker.StopWorker();
+    grouping_worker.StopWorker();
+    zmq_tx_external_worker.StopWorker();
     zmq_rx_worker.StopWorker();
     zmq_tx_worker.StopWorker();
     std::cout << "Stopped Workers..." << std::endl;
