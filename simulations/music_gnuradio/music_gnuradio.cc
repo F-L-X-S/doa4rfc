@@ -94,16 +94,16 @@ int main(int argc, char*argv[])
     // ---------------------- ZMQ Worker ----------------------
     // ZMQ-socket for data import (e.g. from Gnuradio)
     auto& rx_queues = *sync.GetRxQueues();
-    ZmqRxWorker<NUM_CHANNELS> zmq_rx_worker(IMPORT_INTERFACE, rx_queues, stop_signal_called);
+    ZmqRxWorker zmq_rx_worker(IMPORT_INTERFACE, rx_queues, stop_signal_called);
 
     // ZMQ-socket for simulated data export of simulated baseband samples 
     // (simulated for testing purposes without gnuradio)
     ThreadSafeQueue<Samples_2dim_t> tx_queue_gr;
-    ZmqTxWorker<Samples_2dim_t> zmq_tx_gr_worker(IMPORT_INTERFACE, tx_queue_gr, stop_signal_called);
+    ZmqTxWorker zmq_tx_gr_worker(IMPORT_INTERFACE, tx_queue_gr, stop_signal_called);
 
     // ZMQ-socket for data export to MUSIC Python-application
     ThreadSafeQueue<Samples_2dim_t> tx_queue;
-    ZmqTxWorker<Samples_2dim_t> zmq_tx_worker(EXPORT_INTERFACE, tx_queue, stop_signal_called);
+    ZmqTxWorker zmq_tx_worker(EXPORT_INTERFACE, tx_queue, stop_signal_called);
 
     // ---------------------- Framegeneration ----------------------
     // Framegenerator parameters

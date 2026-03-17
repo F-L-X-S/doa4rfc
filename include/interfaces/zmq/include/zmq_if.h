@@ -14,13 +14,13 @@
 
 #include <zmq.hpp>
 #include <vector>
-#include <complex>  
+#include <complex>
 
-#include <queue>       
-#include <mutex>                    
-#include <condition_variable>         
-#include <string>              
-#include <atomic>    
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <string>
+#include <atomic>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
@@ -30,7 +30,7 @@
 #include <sync_worker.h>
 #include <multithread_worker.h>
 
- using namespace sync_worker_types;
+ using namespace sync_worker_queues;
 
 class ZmqSender {
 public:
@@ -55,12 +55,18 @@ private:
 };
 
 /**
- * @brief ZmqRxWorker class receives samples from a ZMQ socket and pushes them into channel-specific rx-sample queues.
- * 
- * @tparam num_channels Number of channels to receive samples for
+ * @brief ZmqRxWorker class receives Samples_3dim_t from a ZMQ socket and pushes them into rx-queues,
+ * decomposing the received data according to rx_item_t: Samples_3dim_t is forwarded directly,
+ * Samples_2dim_t splits by measurement, and Samples_1dim_t splits by measurement and channel.
+ *
+ * @tparam num_queues Number of channels to receive samples for
+ * @tparam rx_item_t Item type of the output queues (Samples_1dim_t, Samples_2dim_t, or Samples_3dim_t)
  */
-template <std::size_t num_channels>
+template <std::size_t num_queues, typename rx_item_t>
 class ZmqRxWorker: public MultithreadWorker{
+    static_assert(std::is_same_v<rx_item_t, Samples_1dim_t> || std::is_same_v<rx_item_t, SampleBlock_t> || num_queues == 1,
+        "num_queues > 1 requires rx_item_t to be Samples_1dim_t or SampleBlock_t since Samples_2dim_t and Samples_3dim_t use only one queue");
+
     public:
         /**
          * @brief Construct a new Zmq Rx Worker object for a single channel
@@ -68,15 +74,15 @@ class ZmqRxWorker: public MultithreadWorker{
          * @param endpoint 
          * @param rx_queue 
          */
-        ZmqRxWorker(        const std::string& endpoint, 
-                            std::array<SampleBlockQueue_t, num_channels>& rx_queues, 
+        ZmqRxWorker(        const std::string& endpoint,
+                            std::array<ThreadSafeQueue<rx_item_t>, num_queues>& rx_queues,
                             std::atomic<bool>&          stop_signal_ref):
             MultithreadWorker(stop_signal_ref),
             receiver_(endpoint),
             rx_queues_(rx_queues) {
-                for (unsigned int i = 0; i < num_channels; ++i){
-                    AddWorkerQueue<SampleBlockQueue_t>(&rx_queues_[i]);
-                };  
+                for (unsigned int i = 0; i < num_queues; ++i){
+                    AddWorkerQueue<ThreadSafeQueue<rx_item_t>>(&rx_queues_[i]);
+                };
         };
 
         /**
@@ -87,29 +93,50 @@ class ZmqRxWorker: public MultithreadWorker{
     
     private:
         /**
-         * @brief The Execute function continuously receives samples from the ZMQ socket 
-         * and pushes them into the corresponding channel-specific rx-sample queue for further processing.
-         * 
+         * @brief Continuously receives Samples_3dim_t from the ZMQ socket and decomposes them into
+         * rx-queue items depending on rx_item_t: Samples_3dim_t forwards the block directly,
+         * Samples_2dim_t splits by measurement, Samples_1dim_t splits by measurement and channel,
+         * and SampleBlock_t splits by measurement and channel with an added nanosecond timestamp.
          */
         void Execute() override final {
-            uint16_t timestamp;  
-
             while (!stop_signal_called->load()) {
                 // Receive samples from ZMQ socket
                 Samples_3dim_t received = receiver_.receive();
                 if (received.empty()) continue;
 
-                // Placeholder timestamp
-                uint16_t timestamp = static_cast<uint16_t>(std::chrono::steady_clock::now().time_since_epoch().count() % 65536);
+                if constexpr (std::is_same_v<rx_item_t, Samples_3dim_t>) {
+                    // Forward entire received block directly (same type)
+                    PushItemToQueue<Samples_3dim_t>(rx_queues_.at(0), std::move(received));
 
-                // Push each measurement's per-channel samples into the corresponding rx queues
-                for (const auto& measurement : received) {
-                    for (unsigned int i = 0; i < num_channels; ++i) {
-                        SampleBlock_t sample_block;
-                        sample_block.samples = measurement[i];
-                        sample_block.timestamp = timestamp;
-                        PushItemToQueue<SampleBlock_t>(rx_queues_.at(i), std::move(sample_block));
+                } else if constexpr (std::is_same_v<rx_item_t, Samples_2dim_t>) {
+                    // Each measurement is a Samples_2dim_t {channel, samples}, forward separately
+                    for (auto& measurement : received) {
+                        PushItemToQueue<Samples_2dim_t>(rx_queues_.at(0), std::move(measurement));
                     }
+
+                } else if constexpr (std::is_same_v<rx_item_t, Samples_1dim_t>) {
+                    // i-th queue transports the samples of the i-th channel
+                    for (auto& measurement : received) {
+                        for (unsigned int i = 0; i < num_queues; ++i) {
+                            PushItemToQueue<Samples_1dim_t>(rx_queues_.at(i), std::move(measurement[i]));
+                        }
+                    }
+
+                } else if constexpr (std::is_same_v<rx_item_t, SampleBlock_t>) {
+                    // i-th queue transports timestamped sample blocks for the i-th channel
+                    uint64_t timestamp = static_cast<uint64_t>(
+                        std::chrono::steady_clock::now().time_since_epoch().count());
+                    for (auto& measurement : received) {
+                        for (unsigned int i = 0; i < num_queues; ++i) {
+                            SampleBlock_t block;
+                            block.samples = std::move(measurement[i]);
+                            block.timestamp = timestamp;
+                            PushItemToQueue<SampleBlock_t>(rx_queues_.at(i), std::move(block));
+                        }
+                    }
+
+                } else {
+                    static_assert(!sizeof(rx_item_t*), "rx_item_t must be Samples_1dim_t, Samples_2dim_t, Samples_3dim_t, or SampleBlock_t");
                 }
             }
         };
@@ -121,28 +148,34 @@ class ZmqRxWorker: public MultithreadWorker{
         ZmqReceiver receiver_;  
         
         /**
-         * @brief Received samples queues for each channel
+         * @brief Received item queues for each channel
          * 
          */
-        std::array<SampleBlockQueue_t, num_channels>& rx_queues_;
+        std::array<ThreadSafeQueue<rx_item_t>, num_queues>& rx_queues_;
 };
 
+// Deduction guide: deduce num_queues and rx_item_t from the rx_queues array
+template <std::size_t N, typename T>
+ZmqRxWorker(const std::string&, std::array<ThreadSafeQueue<T>, N>&, std::atomic<bool>&) -> ZmqRxWorker<N, T>;
+
 /**
- * @brief ZmqTxWorker class sends samples tx-sample queue via a ZMQ socket.
+ * @brief ZmqTxWorker class sends multidimensional sample types from a thread-safe queue to a ZMQ socket.
+ * 
+ * @tparam tx_item_t Type of the items to send, must be either Samples_1dim_t, Samples_2dim_t or Samples_3dim_t
  * 
  */
 template <typename tx_item_t>
 class ZmqTxWorker: public MultithreadWorker{
     public:
         /**
-         * @brief Construct a new Zmq Txx Worker object for a single channel
+         * @brief Construct a new Zmq Tx Worker object for a single channel
          * 
          * @param endpoint 
          * @param tx_queue 
          */
-        ZmqTxWorker(        const std::string&      endpoint, 
-                            ThreadSafeQueue<tx_item_t>&              tx_queue, 
-                            std::atomic<bool>&      stop_signal_ref):
+        ZmqTxWorker(        const std::string&              endpoint, 
+                            ThreadSafeQueue<tx_item_t>&     tx_queue, 
+                            std::atomic<bool>&              stop_signal_ref):
             MultithreadWorker(stop_signal_ref),
             sender_(endpoint),
             tx_queue_(tx_queue) 
@@ -195,6 +228,11 @@ class ZmqTxWorker: public MultithreadWorker{
          */
         ThreadSafeQueue<tx_item_t>& tx_queue_;
 };
+
+// Deduction guide: deduce tx_item_t from tx_queue 
+template <typename T>
+ZmqTxWorker(const std::string&, ThreadSafeQueue<T>&, std::atomic<bool>&) -> ZmqTxWorker<T>;
+
 
 
 #endif // ZMQ_IF
