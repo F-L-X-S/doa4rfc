@@ -77,9 +77,10 @@ void GroupingWorker::Execute() {
 
     while (!stop_signal_called->load()) {
         // Non-blocking pop from queues to buffers
-        std::vector<FrameSamps_t> frame_samps_buffer, frame_syms_buffer;
-        if (0 == PopBatchFromQueue<SampleBlock_t>(frame_samps_queue_, frame_samps_buffer, 0) &&
-            0 == PopBatchFromQueue<SampleBlock_t>(frame_syms_queue_, frame_syms_buffer, 0))
+        std::vector<FrameSamps_t> frame_samps_buffer;
+        std::vector<FrameSyms_t>  frame_syms_buffer;
+        if (0 == PopBatchFromQueue<FrameSamps_t>(frame_samps_queue_, frame_samps_buffer, 0) &&
+            0 == PopBatchFromQueue<FrameSyms_t>(frame_syms_queue_, frame_syms_buffer, 0))
             std::this_thread::sleep_for(std::chrono::milliseconds(10)); // Avoid busy-waiting when no channel has data
             continue;   // No samples available
 
