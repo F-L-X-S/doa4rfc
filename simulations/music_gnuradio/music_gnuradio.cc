@@ -47,10 +47,10 @@ using namespace doa4rfc;
 //#define OFDMFRAME
 
 // ZMQ-socket for import of the generated baseband samples
-#define IMPORT_INTERFACE "tcp://127.0.0.1:5552" 
+#define IMPORT_INTERFACE "tcp://127.0.0.1:5554" 
 
 // ZMQ-socket for data export to MUSIC running in Python-application
-#define EXPORT_INTERFACE "tcp://127.0.0.1:5553" 
+#define EXPORT_INTERFACE "tcp://127.0.0.1:5555" 
 
 // Python-Application with MUSIC algorithm for DoA estimation
 #define PYTHONPATH "./music/env/bin/python"
