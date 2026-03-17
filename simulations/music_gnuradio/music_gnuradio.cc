@@ -19,7 +19,6 @@
  #include <signal_generator.h>
 
 using namespace doa4rfc;
-using namespace sync_worker_types;
 
 // Definition of the transmission-settings 
 #define FRAME_PADDING 30            // Noisy samples around the frame (before and after) 
@@ -87,9 +86,9 @@ int main(int argc, char*argv[])
     #endif
     
     // Add output-queues to sync-worker 
-    FrameSampsQueue_t frame_samps_queue;
+    sync_worker_queues::FrameSampsQueue_t frame_samps_queue;
     sync.AddFrameSampsQueue(std::ref(frame_samps_queue));
-    FrameSymsQueue_t frame_syms_queue;
+    sync_worker_queues::FrameSymsQueue_t frame_syms_queue;
     sync.AddFrameSymsQueue(std::ref(frame_syms_queue));
 
     // ---------------------- ZMQ Worker ----------------------

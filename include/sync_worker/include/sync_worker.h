@@ -27,90 +27,42 @@
 #include <multithread_worker.h>
 #include <multisync.h>
 
+namespace sync_worker_queues {
+
+/**
+ * @brief Thread-Safe Queue structure for sample blocks
+ * 
+ */
+using SampleBlockQueue_t = ThreadSafeQueue<SampleBlock_t>;
+
+/**
+ * @brief Thread-Safe Queue structure for symbol blocks
+ * 
+ */
+using SymbolBlockQueue_t = ThreadSafeQueue<SymbolBlock_t>;
+
+/**
+ * @brief Thread-Safe Queue structure for Frame Samples
+ * 
+ */
+using FrameSampsQueue_t = ThreadSafeQueue<FrameSamps_t>;
+
+/**
+ * @brief Thread-Safe Queue structure for Frame Symbols
+ * 
+ */
+using FrameSymsQueue_t = ThreadSafeQueue<FrameSyms_t>;
+
+/**
+ * @brief Thread-Safe Queue structure for Phase correction values 
+ * 
+ */
+using PhaseQueue_t = ThreadSafeQueue<Phase_t>;
+
+}   // namespace sync_worker_queues
+
 using namespace doa4rfc;
-
-namespace sync_worker_types {
-    /**
-     * @brief Block of samples with timestamp
-     * 
-     */
-    struct SampleBlock_t
-    {
-        Samples_1dim_t samples;                      // Received samples
-        uint64_t timestamp;                          // Global Nano-Second-Timestamp
-    };
-
-    /**
-     * @brief Thread-Safe Queue structure for sample blocks
-     * 
-     */
-    using SampleBlockQueue_t = ThreadSafeQueue<SampleBlock_t>;
-
-    /**
-     * @brief Block of symbols with timestamp
-     * 
-     */
-    struct SymbolBlock_t
-    {
-        Symbols_1dim_t symbols;                      // Received symbols
-        uint64_t timestamp;                          // Global Nano-Second-Timestamp
-    };
-
-    /**
-     * @brief Thread-Safe Queue structure for symbol blocks
-     * 
-     */
-    using SymbolBlockQueue_t = ThreadSafeQueue<SymbolBlock_t>;
-
-
-
-    /**
-     * @brief Sample-Block belonging to one frame 
-     * 
-     */
-    struct FrameSamps_t: public SampleBlock_t {
-        unsigned int channel;                               // Channel index
-    };
-
-    /**
-     * @brief Thread-Safe Queue structure for Frame Samples
-     * 
-     */
-    using FrameSampsQueue_t = ThreadSafeQueue<FrameSamps_t>;
-
-    /**
-     * @brief Symbol-Block belonging to one frame 
-     * 
-     */
-    struct FrameSyms_t: public SymbolBlock_t {
-        unsigned int channel;                               // Channel index
-    };
-
-    /**
-     * @brief Thread-Safe Queue structure for Frame Symbols
-     * 
-     */
-    using FrameSymsQueue_t = ThreadSafeQueue<FrameSyms_t>;
-
-    /**
-     * @brief Phase correction structure to store phase adjustments for NCOs
-     * 
-     */
-    struct Phase_t {
-        float phi;               // Phase data
-        unsigned int channel;    // Channel index
-    };
-
-    /**
-     * @brief Thread-Safe Queue structure for Phase correction values 
-     * 
-     */
-    using PhaseQueue_t = ThreadSafeQueue<Phase_t>;
-
-} // namespace sync_worker_types
-
- using namespace sync_worker_types;
-
+using namespace sync_worker_queues;
 
 /**
  * @brief The SyncWorker function continuously retrieves timestamped sample-blocks from the channel-specific queues and 

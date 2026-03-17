@@ -32,6 +32,51 @@
     using Symbols_1dim_t = std::vector<Symbol_t>;
     using Symbols_2dim_t = std::vector<Symbols_1dim_t>;
     using Symbols_3dim_t = std::vector<Symbols_2dim_t>;
+
+    /**
+     * @brief Block of samples with timestamp
+     * 
+     */
+    struct SampleBlock_t
+    {
+        Samples_1dim_t samples;                      // Received samples
+        uint64_t timestamp;                          // Global Nano-Second-Timestamp
+    };
+
+    /**
+     * @brief Block of symbols with timestamp
+     * 
+     */
+    struct SymbolBlock_t
+    {
+        Symbols_1dim_t symbols;                      // Received symbols
+        uint64_t timestamp;                          // Global Nano-Second-Timestamp
+    };
+
+    /**
+     * @brief Sample-Block belonging to one frame 
+     * 
+     */
+    struct FrameSamps_t: public SampleBlock_t {
+        unsigned int channel;                               // Channel index
+    };
+
+    /**
+     * @brief Symbol-Block belonging to one frame 
+     * 
+     */
+    struct FrameSyms_t: public SymbolBlock_t {
+        unsigned int channel;                               // Channel index
+    };
+
+    /**
+     * @brief Phase correction structure to store phase adjustments for NCOs
+     * 
+     */
+    struct Phase_t {
+        float phi;               // Phase data
+        unsigned int channel;    // Channel index
+    };
  }
 
 namespace liquid_conv {
