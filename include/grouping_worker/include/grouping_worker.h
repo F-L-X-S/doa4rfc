@@ -31,7 +31,6 @@
 #include <multithread_worker.h>
 #include <sync_worker.h>
 #include <zmq_if.h>
-#include <matlabXport.hpp>
 
 #include <doa4rfc.h>
 
@@ -80,7 +79,7 @@ class GroupingWorker: public MultithreadWorker {
                         uint64_t                    max_age,
                         std::atomic<bool>&          stop_signal_ref);
 
-        ~GroupingWorker(){};
+        ~GroupingWorker();
 
         /**
          * @brief Get the reference to the internal frame samples queue to push samples to the worker
@@ -146,7 +145,7 @@ class GroupingWorker: public MultithreadWorker {
          * @param search_offset Number of entries to retain in the buffer
          */
         template <typename T>
-        static void ClearBuffer(std::vector<T>& buffer, unsigned int search_offset);
+        void ClearBuffer(std::vector<T>& buffer, unsigned int search_offset);
 
         /**
          * @brief Number of channels that must be represented in a complete group   
