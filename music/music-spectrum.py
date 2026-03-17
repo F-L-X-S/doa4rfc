@@ -79,7 +79,7 @@ class MusicSpectrum(PyQt6.QtWidgets.QApplication):
 		# ZMQ socket setup
 		context = zmq.Context()
 		self.socket = context.socket(zmq.PULL)
-		self.socket.connect("tcp://localhost:5555")
+		self.socket.bind("tcp://*:5555")
 		self.poller = zmq.Poller()
 		self.poller.register(self.socket, zmq.POLLIN)
 		self.csi = None
