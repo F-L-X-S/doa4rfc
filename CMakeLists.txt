@@ -51,7 +51,7 @@ add_subdirectory(include/sync_worker)
 add_subdirectory(include/multithread_worker)
 add_subdirectory(include/interfaces/uhd)
 add_subdirectory(include/interfaces/zmq)
-add_subdirectory(include/export_worker)
+add_subdirectory(include/grouping_worker)
 add_subdirectory(include/signal_generator)
 add_subdirectory(include/ui_worker)
 
@@ -72,7 +72,7 @@ target_link_libraries(
   ${PROJECT_NAME} 
     multithread_worker
     uhd_if
-    export_worker
+    grouping_worker
     ui_worker
     signal_generator
     matlabXport_lib
@@ -104,7 +104,7 @@ foreach(SOURCE_FILE ${SIMULATIONS_SRC_FILES})
   target_link_libraries(${EXECUTABLE_NAME}
     multithread_worker
     uhd_if
-    export_worker
+    grouping_worker
     ui_worker
     signal_generator
     matlabXport_lib
