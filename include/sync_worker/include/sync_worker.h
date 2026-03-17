@@ -93,18 +93,6 @@ namespace sync_worker_types {
     using FrameSymsQueue_t = ThreadSafeQueue<FrameSyms_t>;
 
     /**
-     * @brief Thread-Safe Queue structure for Samples of all channels belonging to one frame 
-     * 
-     */
-    using MultiChFrameSampsQueue_t = ThreadSafeQueue<Samples_2dim_t>;
-
-    /**
-     * @brief Thread-Safe Queue structure for Symbols of all channels belonging to one frame 
-     * 
-     */
-    using MultiChFrameSymsQueue_t = ThreadSafeQueue<Symbols_2dim_t>;
-
-    /**
      * @brief Phase correction structure to store phase adjustments for NCOs
      * 
      */
