@@ -89,7 +89,9 @@ struct SyncTraits {
 // -------------------- OFDM Frame Synchronizer --------------------
 /**
  * @brief SyncTraits specialization for the OFDM frame synchronizer.
- * Define the functions (Create, Reset, Execute, Destroy, GetFrameSamps) for the OFDM frame synchronizer
+ * Defines the functions (Create, Reset, Execute, Destroy, GetFrameSamps) for the OFDM frame synchronizer.
+ * 
+ * ofdmframesync documentation: https://liquidsdr.org/doc/ofdmflexframe/
  * 
  * @tparam  Synchronizer type
  */
@@ -211,7 +213,9 @@ using ofdmframesync_iface = SyncTraits<ofdmframesync>;
 
 /**
  * @brief SyncTraits specialization for the flexible single-carrier frame synchronizer flexframesync.
- * Define the functions (Create, Reset, Execute, Destroy, GetFrameSamps) for the flexible frame synchronizer
+ * Defines the functions (Create, Reset, Execute, Destroy, GetFrameSamps) for the flexible frame synchronizer.
+ * 
+ * flexframesync documentation: https://liquidsdr.org/doc/flexframe/
  * 
  * @tparam  Synchronizer type
  */
