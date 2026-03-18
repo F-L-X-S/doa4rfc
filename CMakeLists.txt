@@ -34,14 +34,6 @@ find_package(Boost REQUIRED COMPONENTS program_options thread)
 include_directories(${Boost_INCLUDE_DIRS})
 include_directories(${UHD_INCLUDE_DIRS})
 
-# MatlabXport
-FetchContent_Declare(
-    matlabXport
-    GIT_REPOSITORY https://github.com/F-L-X-S/matlabXport
-    GIT_TAG main  
-)
-FetchContent_MakeAvailable(matlabXport)
-
 # ---------- internal libraries ----------------
 include_directories(include)
 set(PROJECT_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
@@ -49,6 +41,7 @@ set(PROJECT_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
 add_subdirectory(include/multisync)
 add_subdirectory(include/sync_worker)
 add_subdirectory(include/multithread_worker)
+add_subdirectory(include/interfaces/matlab)
 add_subdirectory(include/interfaces/uhd)
 add_subdirectory(include/interfaces/zmq)
 add_subdirectory(include/grouping_worker)
@@ -75,8 +68,8 @@ target_link_libraries(
     grouping_worker
     ui_worker
     signal_generator
-    matlabXport_lib
     liquid
+    matlab_if
     zmq_if
     ${UHD_LIBRARIES}
     ${Boost_LIBRARIES}
@@ -107,8 +100,8 @@ foreach(SOURCE_FILE ${SIMULATIONS_SRC_FILES})
     grouping_worker
     ui_worker
     signal_generator
-    matlabXport_lib
     liquid
+    matlab_if
     zmq_if
     ${UHD_LIBRARIES}
     ${Boost_LIBRARIES}

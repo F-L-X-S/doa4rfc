@@ -17,6 +17,7 @@
  #include <grouping_worker.h>
  #include <multithread_worker.h>
  #include <zmq_if.h>
+ #include <matlab_if.h>
  #include <signal_generator.h>
 
 using namespace doa4rfc;
@@ -54,7 +55,10 @@ using namespace doa4rfc;
 
 // Python-Application with MUSIC algorithm for DoA estimation
 #define PYTHONPATH "./music/env/bin/python"
-#define MUSIC_PYFILE "./music/music-spectrum.py"               
+#define MUSIC_PYFILE "./music/music-spectrum.py"             
+
+// MATLAB output file to store results
+#define M_FILE "simulations/music_gnuradio/music_gnuradio.m"
 
 // Signal handler to stop by keaboard interrupt
 std::atomic<bool> stop_signal_called(false);
@@ -120,6 +124,11 @@ int main(int argc, char*argv[])
     ThreadSafeQueue<Samples_2dim_t> tx_queue;
     ZmqTxWorker zmq_tx_worker(EXPORT_INTERFACE, tx_queue, stop_signal_called);
     grouping_worker.AddMultiChSampsQueue(std::ref(tx_queue));           // Add tx workers input queue as grouping worker output queue
+
+    // |grouping_worker|->multi_ch_frame_syms_queue->|matlab_worker|
+    MatlabXport m_xport(M_FILE);                                        // MatlabXport instance to store results in a .m file                                  
+    MatlabWorker matlab_worker(m_xport, stop_signal_called);
+    grouping_worker.AddMultiChSymsQueue(std::ref(*matlab_worker.GetMultiChSymsQueue()));   // Add matlab workers input queue as grouping worker output queue
 
     // ---------------------- Framegeneration ----------------------
     // Framegenerator parameters
@@ -259,6 +268,7 @@ int main(int argc, char*argv[])
     // ---------------------- Run Workers ----------------------
     sync.RunWorker();   
     grouping_worker.RunWorker();
+    matlab_worker.RunWorker();
     zmq_tx_external_worker.RunWorker();
     zmq_rx_worker.RunWorker();
     zmq_tx_worker.RunWorker();
@@ -275,6 +285,7 @@ int main(int argc, char*argv[])
 
     sync.StopWorker();
     grouping_worker.StopWorker();
+    matlab_worker.StopWorker();
     zmq_tx_external_worker.StopWorker();
     zmq_rx_worker.StopWorker();
     zmq_tx_worker.StopWorker();
