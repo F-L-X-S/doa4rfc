@@ -149,7 +149,7 @@ int main(int argc, char*argv[])
             header[i] = i & 0xff;
         for (i=0; i<PAYLOAD_LEN; i++)
             payload[i] = rand() & 0xff;
-        ofdmflexframegen_assemble(fg, NULL, NULL, PAYLOAD_LEN);
+        ofdmflexframegen_assemble(fg, header, payload, PAYLOAD_LEN);
 
         // Complex baseband signal buffer (transmitted sequence)
         std::vector<Sample_t> tx;
