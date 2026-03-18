@@ -139,53 +139,33 @@ int main(int argc, char*argv[])
 
     // Assemble frame and write samples to transmit buffer
     #ifdef OFDMFRAME    
-        // Create frame generator
-        ofdmframegen fg = ofdmframegen_create(M, cp_len, taper_len, p);
+       ofdmflexframegen fg = ofdmflexframegen_create(M,cp_len,taper_len,p,&fgprops);
+
+        // initialize header/payload and assemble frame
+        unsigned int i;
+        unsigned char header[8];
+        unsigned char payload[PAYLOAD_LEN];
+        for (i=0; i<8; i++)
+            header[i] = i & 0xff;
+        for (i=0; i<PAYLOAD_LEN; i++)
+            payload[i] = rand() & 0xff;
+        ofdmflexframegen_assemble(fg, NULL, NULL, PAYLOAD_LEN);
 
         // Complex baseband signal buffer (transmitted sequence)
-        unsigned int frame_len = M +cp_len; 
-        std::vector<Sample_t> tx((3+PAYLOAD_LEN)*frame_len);   // Size given by S0a + S0b + S1 + data symbols  
+        std::vector<Sample_t> tx;
+        unsigned int symbol_len = M + cp_len;
 
-        // Number of generated time-domain baseband samples 
-        unsigned int n=0;             
-        
-        liquid_float_complex* tx_ptr = liquid_conv::Ptr(tx.data());
-
-        // write first S0 symbol
-        ofdmframegen_write_S0a(fg, &tx_ptr[n]);
-        n += frame_len;
-
-        // write second S0 symbol
-        ofdmframegen_write_S0b(fg, &tx_ptr[n]);
-        n += frame_len;
-
-        // write S1 symbol
-        ofdmframegen_write_S1( fg, &tx_ptr[n]);
-        n += frame_len;
-            
-        // modulate data subcarriers
-        std::vector<liquid_float_complex> X(M);                 // channelized symbols
-        for (size_t i=0; i<PAYLOAD_LEN; i++) {
-            // load different subcarriers with different data
-            unsigned int j;
-            for (j=0; j<M; j++) {
-                // ignore 'null' and 'pilot' subcarriers
-                if (p[j] != OFDMFRAME_SCTYPE_DATA)
-                    continue;
-                // Radnom QPSK Symbols
-                X[j] = liquid_float_complex((rand() % 2 ? -0.707f : 0.707f), (rand() % 2 ? -0.707f : 0.707f));
-            }
-
-            // Append OFDM symbol to time-domain complex baseband signal 
-            ofdmframegen_writesymbol(fg, X.data(), &tx_ptr[n]);
-            n += frame_len;
+        // Write one OFDM symbol per iteration until the frame is complete
+        int frame_complete = 0;
+        while (!frame_complete) {
+            size_t offset = tx.size();
+            tx.resize(offset + symbol_len);
+            frame_complete = ofdmflexframegen_write(fg, liquid_conv::Ptr(tx.data() + offset), symbol_len);
         }
+        unsigned int frame_len = tx.size();
 
-    // Update frame_len to the actual number of generated samples
-    frame_len = n; 
-
-    // Destroy frame generator
-    ofdmframegen_destroy(fg);
+        // destroy flexframegen object
+        ofdmflexframegen_destroy(fg);
 
         
     #elif defined(FLEXFRAME)
