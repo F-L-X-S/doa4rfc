@@ -1,8 +1,13 @@
 /**
- * @file music_gnuradio.cc
+ * @file music_sim.cc
  * @author Felix Schuelke (flxscode@gmail.com)
  * 
- * @brief 
+ * @brief This simulation demonstrates the use of the doa4rfc framework for DoA  estimation using the MUSIC algorithm. 
+ * It simulates a multipath-transmission of a baseband signal (multicarrier OFDM signal or single-carrier signal) with configurable impairments for each multipath channel (noise, time-delay, frequency and phase offset).
+ * The isolated baseband samples of the detected frame are transmitted to the MUSIC Python-application via ZMQ-sockets.
+ * 
+ * Select the baseband signal by defining the preprocessor directive OFDMFRAME or FLEXFRAME. The estimated DoA spectrum is stored in a .m file for visualization in MATLAB.
+ * 
  * @version 0.1
  * @date 2026-01-16
  * 
