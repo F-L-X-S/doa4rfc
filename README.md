@@ -14,6 +14,7 @@ This project aims to provide a flexible software architecture, to implement and 
 
 ## Simulations
  [Simulations](simulations/) provided in ./simulations demonstrate the usage of the provided modules, illustrate the underlying mathematical concepts and show the simulation results:
+- [DoA-Estimation with MUSIC for Single- and Multicarrier Signals](simulations/music/README.md) 
 - [Single-Channel CFR-Estimation](simulations/sim_singlechannel/README.md) 
 - [Multi-Channel CFR-Estimation](simulations/sim_multichannel/README.md)
  
