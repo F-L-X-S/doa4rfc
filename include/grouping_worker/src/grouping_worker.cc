@@ -53,8 +53,12 @@ FrameSymsQueue_t* GroupingWorker::GetFrameSymsQueue() {
  * @param queue Queue to retrieve multi-channel frame samples
  */
 void GroupingWorker::AddMultiChSampsQueue(ThreadSafeQueue<Samples_2dim_t>& queue) {
-    multich_samps_queue_ = &queue;
-    AddWorkerQueue<ThreadSafeQueue<Samples_2dim_t>>(multich_samps_queue_);
+    if (!multich_samps_queue_) {
+        multich_samps_queue_ = &queue;
+        AddWorkerQueue<ThreadSafeQueue<Samples_2dim_t>>(multich_samps_queue_);
+    } else {
+        AddDuplicateQueue(multich_samps_queue_, &queue);
+    }
 };
 
 /**
@@ -64,8 +68,12 @@ void GroupingWorker::AddMultiChSampsQueue(ThreadSafeQueue<Samples_2dim_t>& queue
  * @param queue Queue to retrieve multi-channel frame symbols
  */
 void GroupingWorker::AddMultiChSymsQueue(ThreadSafeQueue<Symbols_2dim_t>& queue) {
-    multich_syms_queue_ = &queue;
-    AddWorkerQueue<ThreadSafeQueue<Samples_2dim_t>>(multich_syms_queue_);
+    if (!multich_syms_queue_) {
+        multich_syms_queue_ = &queue;
+        AddWorkerQueue<ThreadSafeQueue<Symbols_2dim_t>>(multich_syms_queue_);
+    } else {
+        AddDuplicateQueue(multich_syms_queue_, &queue);
+    }
 };
 
 /**

@@ -134,6 +134,7 @@ int main(int argc, char*argv[])
     MatlabXport m_xport(M_FILE);                                        // MatlabXport instance to store results in a .m file                                  
     MatlabWorker matlab_worker(m_xport, stop_signal_called);
     grouping_worker.AddMultiChSymsQueue(std::ref(*matlab_worker.GetMultiChSymsQueue()));   // Add matlab workers input queue as grouping worker output queue
+    grouping_worker.AddMultiChSampsQueue(std::ref(*matlab_worker.GetMultiChSampsQueue())); // Add matlab workers input queue as grouping worker output queue
 
     // ---------------------- Framegeneration ----------------------
     // Framegenerator parameters

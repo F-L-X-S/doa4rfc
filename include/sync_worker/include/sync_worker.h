@@ -108,8 +108,12 @@ class SyncWorker: public MultithreadWorker {
          * @return * void 
          */
         void AddFrameSampsQueue(FrameSampsQueue_t& queue) {
-            frame_samps_queue_ = &queue;
-            AddWorkerQueue<FrameSampsQueue_t>(frame_samps_queue_);
+            if (!frame_samps_queue_) {
+                frame_samps_queue_ = &queue;
+                AddWorkerQueue<FrameSampsQueue_t>(frame_samps_queue_);
+            } else {
+                AddDuplicateQueue(frame_samps_queue_, &queue);
+            }
         };
 
         /**
@@ -119,8 +123,12 @@ class SyncWorker: public MultithreadWorker {
          * @return * void 
          */
         void AddFrameSymsQueue(FrameSymsQueue_t& queue) {
-            frame_syms_queue_ = &queue;
-            AddWorkerQueue<FrameSymsQueue_t>(frame_syms_queue_);
+            if (!frame_syms_queue_) {
+                frame_syms_queue_ = &queue;
+                AddWorkerQueue<FrameSymsQueue_t>(frame_syms_queue_);
+            } else {
+                AddDuplicateQueue(frame_syms_queue_, &queue);
+            }
         };
 
         /**

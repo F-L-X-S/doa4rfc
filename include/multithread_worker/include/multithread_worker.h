@@ -22,6 +22,7 @@
 #include <thread>
 #include <chrono>
 #include <type_traits>
+#include <unordered_map>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
@@ -84,6 +85,16 @@ class MultithreadWorker {
          */
         template <typename queue_item_t>
         void PushItemToQueue(ThreadSafeQueue<queue_item_t>& q , std::type_identity_t<queue_item_t>&& item) {
+            // Copy to duplicate queues before moving to primary
+            auto it = duplicate_queues_.find(static_cast<detail::ThreadSafeQueueBase*>(&q));
+            if (it != duplicate_queues_.end()) {
+                for (auto* dup : it->second) {
+                    auto* typed_dup = static_cast<ThreadSafeQueue<queue_item_t>*>(dup);
+                    std::lock_guard<std::mutex> lock(typed_dup->mtx);
+                    typed_dup->queue.push(item);
+                    typed_dup->cv.notify_one();
+                }
+            }
             std::lock_guard<std::mutex> lock(q.mtx);
             q.queue.push(std::move(item));
             q.cv.notify_one();
@@ -98,11 +109,23 @@ class MultithreadWorker {
          */
         template <typename queue_item_t>
         void PushBatchToQueue(ThreadSafeQueue<queue_item_t>& q , std::vector<std::type_identity_t<queue_item_t>>& buffer) {
+            // Copy to duplicate queues before moving to primary
+            auto it = duplicate_queues_.find(static_cast<detail::ThreadSafeQueueBase*>(&q));
+            if (it != duplicate_queues_.end()) {
+                for (auto* dup : it->second) {
+                    auto* typed_dup = static_cast<ThreadSafeQueue<queue_item_t>*>(dup);
+                    std::lock_guard<std::mutex> lock(typed_dup->mtx);
+                    for (const auto& item : buffer) {
+                        typed_dup->queue.push(item);
+                    }
+                    typed_dup->cv.notify_one();
+                }
+            }
             std::lock_guard<std::mutex> lock(q.mtx);
             while (!buffer.empty()) {
                 q.queue.push(std::move(buffer.back()));
-                buffer.pop_back(); 
-            };                           
+                buffer.pop_back();
+            };
             q.cv.notify_one();
         };
 
@@ -210,6 +233,21 @@ class MultithreadWorker {
             queues_.push_back(static_cast<detail::ThreadSafeQueueBase*>(queue));
         };
 
+        /**
+         * @brief Register a duplicate queue for an existing primary queue.
+         * Items pushed to the primary queue will be copied to all its duplicates.
+         *
+         * @tparam queue_item_t Type of the queue item
+         * @param primary Pointer to the primary queue
+         * @param duplicate Pointer to the duplicate queue
+         */
+        template <typename queue_item_t>
+        void AddDuplicateQueue(ThreadSafeQueue<queue_item_t>* primary, ThreadSafeQueue<queue_item_t>* duplicate) {
+            duplicate_queues_[static_cast<detail::ThreadSafeQueueBase*>(primary)].push_back(
+                static_cast<detail::ThreadSafeQueueBase*>(duplicate));
+            queues_.push_back(static_cast<detail::ThreadSafeQueueBase*>(duplicate));
+        };
+
     private:
         /**
          * @brief Reference to sync-worker thread
@@ -222,6 +260,12 @@ class MultithreadWorker {
          * 
          */
         std::vector<detail::ThreadSafeQueueBase*> queues_;
+
+        /**
+         * @brief Map from primary queue to its duplicate queues.
+         * Items pushed to a primary queue are copied to all registered duplicates.
+         */
+        std::unordered_map<detail::ThreadSafeQueueBase*, std::vector<detail::ThreadSafeQueueBase*>> duplicate_queues_;
 
 };
 
