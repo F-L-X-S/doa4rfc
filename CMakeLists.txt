@@ -78,11 +78,9 @@ target_link_libraries(
 # ---------- Simulations ----------------
 # Define source files
 set(SIMULATIONS_SRC_FILES
-  simulations/sim_singlechannel/sim_singlechannel.cc
+  simulations/music/music_sim.cc
   simulations/sim_multichannel/sim_multichannel.cc
-  simulations/sim_music/sim_music.cc
-  simulations/sim_music_singlecarrier/sim_music_singlecarrier.cc
-  simulations/music_gnuradio/music_gnuradio.cc
+  simulations/sim_singlechannel/sim_singlechannel.cc
 )
 
 # Iterate over each file in SOURCE_FILES

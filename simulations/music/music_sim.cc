@@ -63,7 +63,7 @@ using namespace doa4rfc;
 #define MUSIC_PYFILE "./music/music-spectrum.py"             
 
 // MATLAB output file to store results
-#define M_FILE "simulations/music_gnuradio/music_gnuradio.m"
+#define M_FILE "simulations/music/music_sim.m"
 
 // Signal handler to stop by keaboard interrupt
 std::atomic<bool> stop_signal_called(false);
