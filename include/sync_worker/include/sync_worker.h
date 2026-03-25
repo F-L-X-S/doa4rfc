@@ -16,7 +16,7 @@
 #include <mutex>                    
 #include <condition_variable>         
 #include <string>              
-#include <atomic>    
+#include <atomic>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
@@ -183,9 +183,23 @@ class SyncWorker: public MultithreadWorker {
                 // Process Phase Correction to adjust NCO phase for the channel
                 Phase_t phi_corr;
                 if (PopItemFromQueue(phi_corr_queue_, phi_corr)){
-                    std::cout<< "Adjusted NCO of CH"<< phi_corr.channel<<" from"<< ms_.GetNcoPhase(phi_corr.channel)<<" rad";
-                    ms_.AdjustNcoPhase(phi_corr.channel, phi_corr.phi);  // Adjust NCO phase for the channel
-                    std::cout<< "to "<< ms_.GetNcoPhase(phi_corr.channel)<<" rad!"<<std::endl;
+                    if (static_cast<std::size_t>(phi_corr.channel) >= num_channels) {
+                        std::cerr << "Error: Channel " << phi_corr.channel
+                                  << " does not exist (valid: 0-" << num_channels - 1 << ")" << std::endl;
+                    } else {
+                        std::cout << (phi_corr.absolute ? "Set" : "Adjusted") << " NCO of CH" << phi_corr.channel
+                                  << " from " << ms_.GetNcoPhase(phi_corr.channel) << " rad";
+                        if (phi_corr.absolute)
+                            ms_.SetNcoPhase(phi_corr.channel, phi_corr.phi);
+                        else
+                            ms_.AdjustNcoPhase(phi_corr.channel, phi_corr.phi);
+                        std::cout << " to " << ms_.GetNcoPhase(phi_corr.channel) << " rad" << std::endl;
+                    }
+                    // Print current NCO phases for all channels
+                    std::cout << "NCO phases:" << std::endl;
+                    for (std::size_t ch = 0; ch < num_channels; ++ch) {
+                        std::cout << "  CH" << ch << ": " << ms_.GetNcoPhase(ch) << " rad" << std::endl;
+                    }
                 };
 
                 // Process all channels non-blockingly

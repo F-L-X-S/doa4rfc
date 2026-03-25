@@ -76,6 +76,7 @@
     struct Phase_t {
         float phi;               // Phase data
         unsigned int channel;    // Channel index
+        bool absolute = false;   // false: adjust (increment), true: set (absolute)
     };
  }
 

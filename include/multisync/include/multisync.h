@@ -127,6 +127,18 @@ public:
                 };
 
     /**
+     * @brief  Set the phase-correction value for the specified channel by phi [rad] 
+     * (increments the internal nco phase to phi)
+     * 
+     * @param channel_id Channel-ID
+     */
+    void SetNcoPhase(unsigned int channel_id, float phi)
+                {
+                    // Set the NCO phase
+                    nco_crcf_set_phase(nco_[channel_id], phi);
+                };
+
+    /**
      * @brief  Increment the phase-correction value for the specified channel by dphi [rad] 
      * (increments the internal nco phase by dphi)
      * 

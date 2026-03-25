@@ -116,13 +116,29 @@ void TerminalWorker::RegisterBuiltinCommands() {
 
     RegisterCommand("adjust_phase", {
         .usage = "adjust_phase <channel> <phase_rad>",
-        .description = "Adjust phaseshift for a specific channel applied by the internal channel NCO",
+        .description = "Increment NCO phase of a specific channel by the given value [rad]",
         .min_args = 3,
         .handler = [this](const std::vector<std::string>& tokens) -> std::string {
             if (!phase_queue_) return "No phase correction queue connected";
             Phase_t p;
             p.channel = std::stoi(tokens[1]);
             p.phi = static_cast<float>(std::stod(tokens[2]));
+            p.absolute = false;
+            PushItemToQueue(*phase_queue_, std::move(p));
+            return "";
+        }
+    });
+
+    RegisterCommand("set_phase", {
+        .usage = "set_phase <channel> <phase_rad>",
+        .description = "Set NCO phase of a specific channel to an absolute value [rad]",
+        .min_args = 3,
+        .handler = [this](const std::vector<std::string>& tokens) -> std::string {
+            if (!phase_queue_) return "No phase correction queue connected";
+            Phase_t p;
+            p.channel = std::stoi(tokens[1]);
+            p.phi = static_cast<float>(std::stod(tokens[2]));
+            p.absolute = true;
             PushItemToQueue(*phase_queue_, std::move(p));
             return "";
         }
