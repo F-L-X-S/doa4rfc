@@ -28,6 +28,22 @@ void TerminalWorker::SetPhaseCorrQueue(PhaseQueue_t* queue) {
 };
 
 void TerminalWorker::Execute() {
+    std::cout << "\n"
+              << R"(       /$$                     /$$   /$$            /$$$$$$         )" << "\n"
+              << R"(      | $$                    | $$  | $$           /$$__  $$        )" << "\n"
+              << R"(  /$$$$$$$  /$$$$$$   /$$$$$$ | $$  | $$  /$$$$$$ | $$  \__//$$$$$$$)" << "\n"
+              << R"( /$$__  $$ /$$__  $$ |____  $$| $$$$$$$$ /$$__  $$| $$$$   /$$_____/)" << "\n"
+              << R"(| $$  | $$| $$  \ $$  /$$$$$$$|_____  $$| $$  \__/| $$_/  | $$      )" << "\n"
+              << R"(| $$  | $$| $$  | $$ /$$__  $$      | $$| $$      | $$    | $$      )" << "\n"
+              << R"(|  $$$$$$$|  $$$$$$/|  $$$$$$$      | $$| $$      | $$    |  $$$$$$$)" << "\n"
+              << R"( \_______/ \______/  \_______/      |__/|__/      |__/     \_______/)" << "\n"
+              << "\n"
+              << "  Realtime Direction-of-Arrival Estimation for RF Communication Protocols\n"
+              << "  (c) Felix Schuelke | MIT License\n"
+              << "\n"
+              << "  Type 'help' for available commands.\n"
+              << std::endl;
+
     while (!stop_signal_called->load()) {
         std::string input;
         if (!std::getline(std::cin, input)) break;
