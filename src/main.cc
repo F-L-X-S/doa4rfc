@@ -1,19 +1,16 @@
 /**
  * @file main.cc
  * @author Felix Schuelke 
- * @brief DoA Estimation of an OFDM transmitter using an uniform linear antenna array (lambda-half spacing)
+ * @brief DoA Estimation of an OFDM / Singlecarrier signal using an uniform linear antenna array (lambda-half spacing) and USRP N210 SDRs.
+ * 1. Generation of baseband samples of a multicarrier OFDM signal or single-carrier signal 
+ * 2. Cyclic transmission of the generated frame 
+ * 3. Reception of the transmitted signal at 2 receiving channels (RX antennas)
+ * 4. Frame detection synchronization for each receiving channel
+ * 5. Grouping of the detected frames baseband samples and data symbols across the receiving channels
+ * 6. a) Export of the grouped baseband samples to a MUSIC Python-application via ZMQ-socket
+ *    b) Export of the grouped data symbols to the specified .m file for visualization in MATLAB
  * 
- * 1. A complex OFDM Signal is generated and transmitted by the tx-worker
- * 2. The received samples of each channel are processed by separated rx-worker, which forward the received samples to the sync-worker
- * 3. The queued samples of each rx-channel are synchronized by a independent ofdm-synchronizer within the sync-worker. The synchronization is 
- *    possible for other modulation types by manipulating the MultiSync-class. 
- *      -> Detected data-symbols are forwarded as queued callback-data to the cbdata_export_worker, which exports them to the specified MATLAB-file
- *      -> The Channel Frequency Responses (CFRs) of detected frames are forwarded to the cfr_export_worker
- * 4. The cfr_export_worker writes the CFRs to the specified MATLAB file and forwards them via a ZMQ-socket to the music-spectrum.py
- *      -> The spatial MUSIC-spectrum is calculated by music-spectrum.py
- * 
- * The configuration of the USRP-hardware is performed by the stream-worker. 
- * All workers are defined in multi_rx.h 
+ * Select the signal modulation by defining the preprocessor directive OFDMFRAME or FLEXFRAME. 
  * 
  * Ettus example project for USRP integartion: https://kb.ettus.com/Getting_Started_with_UHD_and_C%2B%2B
  * Liquid-DSP documentation: https://liquidsdr.org
@@ -26,37 +23,57 @@
  * 
  */
 
+#include <uhd_if.h>
 #include <uhd/utils/thread_priority.hpp>
 #include <uhd/utils/safe_main.hpp>
 #include <uhd/usrp/multi_usrp.hpp>
 #include <uhd/exception.hpp>
 #include <uhd/types/tune_request.hpp>
-#include <boost/program_options.hpp>
-#include <boost/algorithm/string.hpp>
-#include <boost/format.hpp>
-#include <boost/thread.hpp>
+
 #include <iostream>
 #include <csignal>
-#include <cstdlib>
-#include <atomic>
-#include <queue>
-#include <mutex>
-#include <condition_variable>
 
-#include <uhd_if.h>
+#include <liquid.h>
+
+#include <doa4rfc.h>
 #include <sync_worker.h>
+#include <grouping_worker.h>
+#include <multithread_worker.h>
+#include <zmq_if.h>
+#include <matlab_if.h>
 #include <ui_worker.h>
-#include <export_worker.h>
+#include <signal_generator.h>
 
-#define NUM_CHANNELS 2                                          // Number of Channels (USRP-devices)   
-#define SYMBOLS_PER_FRAME 1                                     // Number of Symbols to send per frame 
-#define OUTFILE_CFR "./measurements/music_125MHz_M256_1m/music_125MHz_M256_1m_10deg/cfr.m"         // Output file in MATLAB-format to store results
-#define OUTFILE_CBDATA "./measurements/music_125MHz_M256_1m/music_125MHz_M256_1m_10deg/cbdata.m"   // Output file in MATLAB-format to store results
+using namespace doa4rfc;
 
+// Definition of the transmission-settings 
+#define NUM_CHANNELS 2              // Number of multipath channels (RX antennas)
+#define SAMPLE_RATE 3.84e6          // Sample rate [Hz] 
+#define CARRIER_FREQUENCY 1.25e9    // Carrier Frequency [Hz]
+
+// Frame-generator parameters (OFDMFRAME/FLEXFRAME)
+#define PAYLOAD_LEN 4                   // Payload length (bytes)
+#define MOD_SCHEME LIQUID_MODEM_QPSK    // Modulation scheme
+#define CHECK LIQUID_CRC_16             // Data validity check
+#define FEC0 LIQUID_FEC_NONE            // Inner forward error-correction
+#define FEC1 LIQUID_FEC_NONE            // Outer forward error-correction
+
+// Select Modulation Type 
+//#define FLEXFRAME
+#define OFDMFRAME
+
+// ZMQ-socket for import of the generated baseband samples
+#define IMPORT_INTERFACE "tcp://127.0.0.1:5554" 
+
+// ZMQ-socket for data export to MUSIC running in Python-application
+#define EXPORT_INTERFACE "tcp://127.0.0.1:5555" 
+
+// Python-Application with MUSIC algorithm for DoA estimation
 #define PYTHONPATH "./music/env/bin/python"
-#define MUSIC_PYFILE "./music/music-spectrum.py"                // Python script with MUSIC algorithm for DoA estimation
-#define EXPORT_INTERFACE 'tcp://localhost:5555'                 // Interface for zmq socket
+#define MUSIC_PYFILE "./music/music-spectrum.py"             
 
+// MATLAB output file to store results
+#define M_FILE "measurements/music.m"
 
 // Signal handler to stop by keaboard interrupt
 std::atomic<bool> stop_signal_called(false);
@@ -69,25 +86,92 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     uhd::set_thread_priority_safe();
     std::signal(SIGINT, &sig_int_handler);
 
-    // ZMQ socket for data export 
-    ZmqSender sender("tcp://*:5555");
-
     // Run spectral MUSIC DoA algorithm
     std::string cmd = std::string(PYTHONPATH) + ' ' + std::string(MUSIC_PYFILE)+"&";
     system(cmd.c_str());
 
-    // Matlab Export destination file
-    MatlabXport m_file_cfr(OUTFILE_CFR);
-    MatlabXport m_file_cbdata(OUTFILE_CBDATA);
+    // ---------------------- Framegeneration ----------------------
+    // Framegenerator parameters
+    #ifdef OFDMFRAME
+        ofdmflexframegenprops_s fgprops;
+        ofdmflexframegenprops_init_default(&fgprops);
+    #elif defined(FLEXFRAME)
+        flexframegenprops_s fgprops;
+        flexframegenprops_init_default(&fgprops);
+    #endif
 
+    // Set modulation scheme, data validity check and forward error-correction schemes
+    fgprops.mod_scheme  = MOD_SCHEME;
+    fgprops.check       = CHECK;
+    fgprops.fec0        = FEC0;
+    fgprops.fec1        = FEC1;
+
+    // Assemble frame and write samples to transmit buffer
+    #ifdef OFDMFRAME    
+        //Define OFDM parameters
+        constexpr unsigned int M           = 256;   // number of subcarriers 
+        constexpr unsigned int cp_len      = 20;    // cyclic prefix length 
+        constexpr unsigned int taper_len   = 4;     // window taper length 
+        static unsigned char p[M];                  // subcarrier allocation array
+        ofdmframe_init_default_sctype(M, p);        // initialize subcarrier allocation
+
+       ofdmflexframegen fg = ofdmflexframegen_create(M,cp_len,taper_len,p,&fgprops);
+
+        // initialize header/payload and assemble frame
+        unsigned int i;
+        unsigned char header[8];
+        unsigned char payload[PAYLOAD_LEN];
+        for (i=0; i<8; i++)
+            header[i] = i & 0xff;
+        for (i=0; i<PAYLOAD_LEN; i++)
+            payload[i] = rand() & 0xff;
+        ofdmflexframegen_assemble(fg, header, payload, PAYLOAD_LEN);
+
+        // Complex baseband signal buffer (transmitted sequence)
+        std::vector<Sample_t> tx;
+        unsigned int symbol_len = M + cp_len;
+
+        // Write one OFDM symbol per iteration until the frame is complete
+        int frame_complete = 0;
+        while (!frame_complete) {
+            size_t offset = tx.size();
+            tx.resize(offset + symbol_len);
+            frame_complete = ofdmflexframegen_write(fg, liquid_conv::Ptr(tx.data() + offset), symbol_len);
+        }
+        unsigned int frame_len = tx.size();
+
+        // destroy flexframegen object
+        ofdmflexframegen_destroy(fg);
+
+        
+    #elif defined(FLEXFRAME)
+        flexframegen fg = flexframegen_create(&fgprops);
+
+        // assemble frame with default payload (NULL-ptr)
+        flexframegen_assemble(fg, NULL, NULL, PAYLOAD_LEN);
+
+        // Complex baseband signal buffer (transmitted sequence)
+        unsigned int frame_len = flexframegen_getframelen(fg);
+        std::vector<Sample_t> tx(frame_len);            
+
+        // Write Samples to transmit buffer
+        while (!flexframegen_write_samples(fg, liquid_conv::Ptr(tx.data()), tx.size())){
+            tx.resize(tx.size()+1);
+        };
+
+        // destroy flexframegen object
+        flexframegen_destroy(fg);
+    #endif
+
+   // ---------------------- UHD Interface Stream Worker ----------------------
     // USRP Constants
     unsigned long int DAC_RATE = 400e6;             // USRP DAC Rate (N210 fixed to 400MHz)
     unsigned long int ADC_RATE = 100e6;             // USRP ADC Rate (N210 fixed to 100MHz)
 
     // TX/RX Settings 
-    double center_freq = 1.25e9;                    // Carrier frequency 
-    double txrx_rate = 3.84e6;                      // Sample rate  
-    unsigned int tx_cycle = 1500;                    // Transmit every ... [ms]
+    double center_freq = CARRIER_FREQUENCY;         // Carrier frequency 
+    double txrx_rate = SAMPLE_RATE;                 // Sample rate  
+    unsigned int tx_cycle = 1500;                   // Transmit testframe every ... [ms]
     double max_age = 0.45*(double)tx_cycle/1000;    // max time delta between CFRs to group together [s]
 
     // TX 
@@ -104,55 +188,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     decim_rate = (decim_rate >> 1) << 1;        // ensure multiple of 2
     double usrp_rx_rate = ADC_RATE / (float)decim_rate;
 
-    // ---------------------- Signal Generation in complex baseband ----------------------
-    unsigned int M           = 256;     // number of subcarriers 
-    unsigned int cp_len      = 20;      // cyclic prefix length 
-    unsigned int taper_len   = 4;       // window taper length 
-    unsigned char p[M];                 // subcarrier allocation array
-
-    unsigned int frame_len   = M + cp_len;
-    unsigned int frame_samples = (3+SYMBOLS_PER_FRAME)*frame_len; // S0a + S0b + S1 + data symbols
-
-    // initialize subcarrier allocation
-    ofdmframe_init_default_sctype(M, p);
-
-    // create frame generator
-    ofdmframegen fg = ofdmframegen_create(M, cp_len, taper_len, p);
-
-    std::vector<std::complex<float>> tx_base(frame_samples);     // complex baseband signal buffer
-    std::vector<std::complex<float>> X(M);                       // channelized symbols
-    unsigned int n=0;                                            // Sample number in time domains
-
-    // write first S0 symbol
-    ofdmframegen_write_S0a(fg, &tx_base[n]);
-    n += frame_len;
-
-    // write second S0 symbol
-    ofdmframegen_write_S0b(fg, &tx_base[n]);
-    n += frame_len;
-
-    // write S1 symbol
-    ofdmframegen_write_S1( fg, &tx_base[n]);
-    n += frame_len;
-
-    // modulate data subcarriers
-    for (size_t i=0; i<SYMBOLS_PER_FRAME; i++) {
-        // load different subcarriers with different data
-        unsigned int j;
-        for (j=0; j<M; j++) {
-            // ignore 'null' and 'pilot' subcarriers
-            if (p[j] != OFDMFRAME_SCTYPE_DATA)
-                continue;
-            // Radnom BPSK Symbols
-            X[j] = std::complex<float>((rand() % 2 ? -1.0f : 1.0f), 0.0f);
-        }
-
-        // generate OFDM symbol in the time domain
-        ofdmframegen_writesymbol(fg, X.data(), &tx_base[n]);
-        n += frame_len;
-    }
-
-   // ---------------------- Configure USRPs ----------------------
     //create USRP devices
     std::array<uhd::usrp::multi_usrp::sptr, 2> usrps {
         uhd::usrp::multi_usrp::make("addr=192.168.10.3"), 
@@ -172,13 +207,25 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
         double(750) ,std::ref(stop_signal_called));
     std::this_thread::sleep_for(std::chrono::milliseconds(3*tx_cycle));
 
-    // ---------------------- Configure Synchronization worker ----------------------
-    SyncWorker<2, ofdmframesync_iface> sync({M, cp_len, taper_len, p}, std::ref(stop_signal_called));
+    // ---------------------- Synchronization Worker ----------------------
+    #ifdef OFDMFRAME
+            SyncWorker<NUM_CHANNELS, ofdmframesync_iface> sync({M, cp_len, taper_len, p}, std::ref(stop_signal_called));
+    #elif defined(FLEXFRAME)
+            SyncWorker<NUM_CHANNELS, flexframesync_iface> sync({}, std::ref(stop_signal_called));
+    #else 
+        #error "Synchronizer-Type not supported: Define OFDMFRAME or FLEXFRAME"
+    #endif
 
-    // ---------------------- Configure Receive workers ----------------------
-    // TX stream configuration 
-    uhd::tx_streamer::sptr tx_stream_0 = usrps[0]->get_tx_stream(stream_args); 
+    // ---------------------- Grouping Worker ----------------------
+    GroupingWorker grouping_worker(NUM_CHANNELS, max_age, std::ref(stop_signal_called)); 
 
+    // |sync_worker|->frame_samps_queue->|grouping_worker|
+    sync.AddFrameSampsQueue(std::ref(*grouping_worker.GetFrameSampsQueue())); 
+
+    // |sync_worker|->frame_syms_queue->|grouping_worker|
+    sync.AddFrameSymsQueue(std::ref(*grouping_worker.GetFrameSymsQueue()));                 
+
+    // ---------------------- UHD Interface Receive workers ----------------------
     // RX Resampling rate
     usrp_rx_rate = usrps[0]->get_rx_rate(0);
     double rx_resamp_rate = txrx_rate / usrp_rx_rate;
@@ -190,22 +237,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     std::thread t1(rx_worker<4096>, rx_stream_0, std::ref(rx_queues[0]), std::ref(stop_signal_called));
     std::thread t2(rx_worker<4096>, rx_stream_1, std::ref(rx_queues[1]), std::ref(stop_signal_called));
 
-    // ---------------------- Run Sync workers ----------------------
-    sync.RunWorker();
-
-    // ---------------------- Configure Export workers ----------------------
-    // Add output-queues to sync-worker 
-    FrameSampsQueue_t frame_samps_queue;
-    FrameSymsQueue_t frame_syms_queue;
-    sync.AddFrameSampsQueue(std::ref(frame_samps_queue));
-    sync.AddFrameSymsQueue(std::ref(frame_syms_queue));
-
-    std::thread t4(cfr_export_worker<NUM_CHANNELS>, std::ref(frame_samps_queue), 
-        max_age, std::ref(sender), std::ref(m_file_cfr), std::ref(stop_signal_called));
-    
-    std::thread t5(cbdata_export_worker, std::ref(frame_syms_queue), std::ref(m_file_cbdata), std::ref(stop_signal_called));
-
-    // ---------------------- Configure Transmit workers ----------------------
+    // ---------------------- UHD Interface Transmit workers ----------------------
+    // TX stream configuration 
+    uhd::tx_streamer::sptr tx_stream_0 = usrps[0]->get_tx_stream(stream_args); 
 
     // TX Arbitrary Resampler 
     usrp_tx_rate = usrps[0]->get_tx_rate(0);
@@ -213,26 +247,45 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     std::cout << boost::format("Required TX Resampling Rate: %f ") % (tx_resamp_rate) << std::endl;
 
     // Transmission thread 
-    std::thread t6(tx_worker, std::ref(tx_stream_0), std::ref(tx_base), tx_cycle, std::ref(stop_signal_called));
+    std::thread t3(tx_worker, std::ref(tx_stream_0), std::ref(tx), tx_cycle, std::ref(stop_signal_called));
+
+    // ---------------------- MatlabXport worker ----------------------
+    // |grouping_worker|->multi_ch_frame_syms_queue->|matlab_worker|
+    MatlabXport m_xport(M_FILE);                                                            // MatlabXport instance to store results in a .m file                                  
+    MatlabWorker matlab_worker(m_xport, stop_signal_called);
+    grouping_worker.AddMultiChSymsQueue(std::ref(*matlab_worker.GetMultiChSymsQueue()));    // Add matlab workers input queue as grouping worker output queue
+
+    // ---------------------- Zmq worker ----------------------
+    // ZMQ-socket for data export to MUSIC Python-application
+    // |grouping_worker|->multi_ch_frame_samps_queue->|zmq_tx_worker|
+    ThreadSafeQueue<Samples_2dim_t> tx_queue;
+    ZmqTxWorker zmq_tx_worker(EXPORT_INTERFACE, tx_queue, stop_signal_called);
+    grouping_worker.AddMultiChSampsQueue(std::ref(tx_queue));           // Add tx workers input queue as grouping worker output queue
 
     // ---------------------- Configure Terminal workers ----------------------
-    PhaseQueue_t& phi_error_queue = *sync.GetPhaseCorrQueue();   // Get input-queue for channel phase-offset correction 
-    std::thread t7(terminal_worker, std::ref(phi_error_queue), std::ref(stop_signal_called));
+    std::thread t4(terminal_worker, std::ref(*sync.GetPhaseCorrQueue()), std::ref(stop_signal_called));
 
     // ---------------------- Continue in main thread ----------------------
+    sync.RunWorker();   
+    grouping_worker.RunWorker();
+    matlab_worker.RunWorker();
+    zmq_tx_worker.RunWorker();
+    std::cout << "Started Receiving..." << std::endl;
+
     while (!stop_signal_called.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
 
     sync.StopWorker();
+    grouping_worker.StopWorker();
+    matlab_worker.StopWorker();
+    zmq_tx_worker.StopWorker();
 
     t0.join();
     t1.join();
     t2.join();
+    t3.join();
     t4.join();
-    t5.join();
-    t6.join();
-    t7.join();
 
     std::cout << "Stopped receiving...\n" << std::endl;
 
