@@ -136,6 +136,7 @@ int main(int argc, char*argv[])
     MatlabWorker matlab_worker(m_xport, stop_signal_called);
     grouping_worker.AddMultiChSymsQueue(std::ref(*matlab_worker.GetMultiChSymsQueue()));   // Add matlab workers input queue as grouping worker output queue
     grouping_worker.AddMultiChSampsQueue(std::ref(*matlab_worker.GetMultiChSampsQueue())); // Add matlab workers input queue as grouping worker output queue
+    matlab_worker.SetExportEnabled(false);                                                 // Deactivate continuous export to .m file by default (activate via terminal)
 
     // ---------------------- Framegeneration ----------------------
     // Framegenerator parameters
@@ -275,6 +276,7 @@ int main(int argc, char*argv[])
     // ---------------------- Terminal Worker ----------------------
     TerminalWorker terminal(stop_signal_called);
     terminal.SetPhaseCorrQueue(sync.GetPhaseCorrQueue());
+    terminal.SetMatlabWorker(&matlab_worker);
 
     // ---------------------- Run Workers ----------------------
     sync.RunWorker();   
@@ -285,17 +287,15 @@ int main(int argc, char*argv[])
     zmq_tx_worker.RunWorker();
     terminal.RunWorker();
     std::cout << "Started Workers..." << std::endl;
-
-    // Wait 3 sec...
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-
-    // Add generated Frame to queue for transmission to doa4rfc 
-    zmq_tx_external_worker.PushItemToQueue(tx_queue_external, std::move(rx));
     
     // Wait until program is exited by user... 
     while (!stop_signal_called.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    }
+
+        // Add generated Frame to queue for transmission to doa4rfc 
+        auto rx_copy = rx;
+        zmq_tx_external_worker.PushItemToQueue(tx_queue_external, std::move(rx_copy));
+    };
 
     terminal.StopWorker();
     sync.StopWorker();

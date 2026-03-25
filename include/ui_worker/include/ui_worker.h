@@ -23,6 +23,7 @@
 
 #include <multithread_worker.h>
 #include <sync_worker.h>
+#include <matlab_if.h>
 
 /**
  * @brief Command handler signature: receives tokenized input, returns error string (empty on success)
@@ -68,6 +69,13 @@ class TerminalWorker : public MultithreadWorker {
          */
         void SetPhaseCorrQueue(PhaseQueue_t* queue);
 
+        /**
+         * @brief Set the MatlabWorker instance for export control commands
+         *
+         * @param worker Pointer to the MatlabWorker instance
+         */
+        void SetMatlabWorker(MatlabWorker* worker);
+
     protected:
         void Execute() override final;
 
@@ -75,6 +83,7 @@ class TerminalWorker : public MultithreadWorker {
         std::unordered_map<std::string, Command> commands_;
 
         PhaseQueue_t* phase_queue_ = nullptr;
+        MatlabWorker* matlab_worker_ = nullptr;
 
         /**
          * @brief Register built-in commands (help, adjust_phase)

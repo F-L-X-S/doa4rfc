@@ -61,6 +61,24 @@ class MatlabWorker: public MultithreadWorker {
          */
         ThreadSafeQueue<Symbols_2dim_t>* GetMultiChSymsQueue();
 
+        /**
+         * @brief Enable or disable continuous MATLAB export
+         *
+         * @param enabled true to enable, false to disable
+         */
+        void SetExportEnabled(bool enabled);
+
+        /**
+         * @brief Check if continuous MATLAB export is enabled
+         *
+         * @return true if enabled
+         */
+        bool GetExportEnabled() const;
+
+        /**
+         * @brief Export only the next single frame of each type, then stop exporting
+         */
+        void ExportSingle();
 
     protected:
 
@@ -104,6 +122,21 @@ class MatlabWorker: public MultithreadWorker {
          * 
          */
         unsigned int syms_frame_counter_ = 0;
+
+        /**
+         * @brief Controls whether continuous export is active
+         */
+        std::atomic<bool> export_enabled_{true};
+
+        /**
+         * @brief Remaining single-shot sample frames to export (0 = inactive)
+         */
+        std::atomic<unsigned int> samps_single_shot_{0};
+
+        /**
+         * @brief Remaining single-shot symbol frames to export (0 = inactive)
+         */
+        std::atomic<unsigned int> syms_single_shot_{0};
 
         /**
          * @brief Export all available multi-channel frame samples from the multich_samps_queue_ to the MatlabXport instance. 

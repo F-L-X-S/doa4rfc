@@ -43,6 +43,19 @@ ThreadSafeQueue<Symbols_2dim_t>* MatlabWorker::GetMultiChSymsQueue() {
     return &multich_syms_queue_;
 };
 
+void MatlabWorker::SetExportEnabled(bool enabled) {
+    export_enabled_.store(enabled);
+};
+
+bool MatlabWorker::GetExportEnabled() const {
+    return export_enabled_.load();
+};
+
+void MatlabWorker::ExportSingle() {
+    export_enabled_.store(false);
+    samps_single_shot_.store(1);
+    syms_single_shot_.store(1);
+};
 
 /**
  * @brief This function is executed within a dedicated thread.
@@ -55,15 +68,33 @@ void MatlabWorker::Execute() {
         // Non-blocking pop from queues to buffers
         std::vector<Samples_2dim_t> multich_samps_buffer;
         std::vector<Symbols_2dim_t> multich_syms_buffer;
-        if (0 == PopBatchFromQueue(multich_samps_queue_, multich_samps_buffer, 0) &&
-            0 == PopBatchFromQueue(multich_syms_queue_, multich_syms_buffer, 0)) {
+        auto samps_count = PopBatchFromQueue(multich_samps_queue_, multich_samps_buffer, 0);
+        auto syms_count = PopBatchFromQueue(multich_syms_queue_, multich_syms_buffer, 0);
+        if (0 == samps_count && 0 == syms_count) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10)); // Avoid busy-waiting when no channel has data
             continue;   // No samples available
         }
 
-        // Export buffers to MATLAB file
-        ExportSampsBuffer(multich_samps_buffer);
-        ExportSymsBuffer(multich_syms_buffer);
+        // Export buffers to MATLAB file (only if enabled or single-shot active)
+        if (export_enabled_.load() || samps_single_shot_.load() > 0) {
+            if (!export_enabled_.load() && samps_single_shot_.load() > 0) {
+                // Single-shot: keep only the first frame
+                if (multich_samps_buffer.size() > 1)
+                    multich_samps_buffer.resize(1);
+                samps_single_shot_.store(0);
+            }
+            ExportSampsBuffer(multich_samps_buffer);
+        }
+
+        if (export_enabled_.load() || syms_single_shot_.load() > 0) {
+            if (!export_enabled_.load() && syms_single_shot_.load() > 0) {
+                // Single-shot: keep only the first frame
+                if (multich_syms_buffer.size() > 1)
+                    multich_syms_buffer.resize(1);
+                syms_single_shot_.store(0);
+            }
+            ExportSymsBuffer(multich_syms_buffer);
+        }
 
     } // while
 };

@@ -27,6 +27,10 @@ void TerminalWorker::SetPhaseCorrQueue(PhaseQueue_t* queue) {
     phase_queue_ = queue;
 };
 
+void TerminalWorker::SetMatlabWorker(MatlabWorker* worker) {
+    matlab_worker_ = worker;
+};
+
 void TerminalWorker::Execute() {
     std::cout << "\n"
               << R"(       /$$                     /$$   /$$            /$$$$$$         )" << "\n"
@@ -84,6 +88,28 @@ void TerminalWorker::RegisterBuiltinCommands() {
             for (const auto& [name, cmd] : commands_)
                 std::cout << "  " << cmd.usage << " — " << cmd.description << std::endl;
             std::cout << "  exit | quit | q — Terminate program" << std::endl;
+            return "";
+        }
+    });
+
+    RegisterCommand("matlab", {
+        .usage = "matlab <on|off|single>",
+        .description = "Control MATLAB export: on (continuous), off (disabled), single (export next frame only)",
+        .min_args = 2,
+        .handler = [this](const std::vector<std::string>& tokens) -> std::string {
+            if (!matlab_worker_) return "No MATLAB worker connected";
+            if (tokens[1] == "on") {
+                matlab_worker_->SetExportEnabled(true);
+                std::cout << "MATLAB export enabled" << std::endl;
+            } else if (tokens[1] == "off") {
+                matlab_worker_->SetExportEnabled(false);
+                std::cout << "MATLAB export disabled" << std::endl;
+            } else if (tokens[1] == "single") {
+                matlab_worker_->ExportSingle();
+                std::cout << "MATLAB export: capturing next single frame" << std::endl;
+            } else {
+                return "Unknown option '" + tokens[1] + "'. Use on, off, or single";
+            }
             return "";
         }
     });

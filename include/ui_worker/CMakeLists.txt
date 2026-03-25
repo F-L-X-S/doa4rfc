@@ -12,4 +12,4 @@ add_library(ui_worker STATIC
 target_include_directories(ui_worker PUBLIC include ${PROJECT_INCLUDE_DIR})
 
 # Set lib-dependencies
-target_link_libraries(ui_worker PUBLIC ${Boost_LIBRARIES} sync_worker)
+target_link_libraries(ui_worker PUBLIC ${Boost_LIBRARIES} sync_worker matlab_if)

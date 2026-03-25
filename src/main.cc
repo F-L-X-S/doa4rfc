@@ -265,6 +265,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     // ---------------------- Configure Terminal worker ----------------------
     TerminalWorker terminal(stop_signal_called);
     terminal.SetPhaseCorrQueue(sync.GetPhaseCorrQueue());
+    terminal.SetMatlabWorker(&matlab_worker);
 
     // ---------------------- Continue in main thread ----------------------
     sync.RunWorker();
