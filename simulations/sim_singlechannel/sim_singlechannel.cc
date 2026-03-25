@@ -64,7 +64,8 @@
  #include <complex>
  #include <cassert>
  #include <liquid.h>
- #include <signal_generator/signal_generator.h>
+ #include <doa4rfc.h>
+ #include <signal_generator.h>
  #include <matlabXport.hpp>
 
 // Definition of the transmission-settings 
@@ -208,7 +209,13 @@ int main(int argc, char*argv[])
         // Store the CFR after the first data symbol is detected
         if (cb_data.buffer.size() && !cb_data.cfr.size()){
             cb_data.cfr.resize(M);
-            ofdmframesync_get_cfr(fs, &cb_data.cfr[0], M); 
+            unsigned int k = 0;
+            unsigned int ret_val = 1;
+            while (ret_val != 0) {
+                    liquid_float_complex* _x_liquid = liquid_conv::Ptr(&cb_data.cfr[k]);
+                    ret_val = ofdmframesync_get_cfr(fs, _x_liquid, k);
+                    k++;                                 
+            }; 
         };
     };
     
