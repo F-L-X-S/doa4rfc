@@ -66,13 +66,15 @@
  #include <complex>
  #include <cassert>
  #include <liquid.h>
- #include <signal_generator/signal_generator.h>
- #include <matlabXport.hpp>
+
+ #include <doa4rfc.h>
  #include <multisync.h>
+ #include <signal_generator.h>
+ #include <matlabXport.hpp>
 
 // Definition of the transmission-settings 
 #define NUM_SAMPLES 1200            // Total Number of samples to be generated 
-#define SYMBOLS_PER_FRAME 3         // Number of data-symbols transmitted per frame
+#define SYMBOLS_PER_FRAME 1         // Number of data-symbols transmitted per frame
 #define FRAME_START 30              // Start position of the ofdm-frame in the sequence
 #define NUM_CHANNELS 4              // Number of simulated channels 
  
@@ -88,31 +90,30 @@
 // Output file in MATLAB-format to store results
 #define OUTFILE "simulations/sim_multichannel/sim_multichannel.m" 
 
-// Sample type
-using Sample_t = std::complex<float>; 
-
 // custom data type to pass to callback function
-struct callback_data {
-    std::vector<Sample_t> buffer;        // Buffer to store detected symbols 
-    std::vector<float> cfo;              // carrier frequency offsets estimated per sample 
-    std::vector<Sample_t> cfr;           // channel frequency response 
+struct CallbackData_t {
+    FrameSamps_t frame_samps;                   // Samples belonging to detected frames
+    FrameSyms_t frame_syms;                     // Symbols belonging to detected frames
+    MultiSync<ofdmframesync_iface>* ms_ptr;     // Pointer to MultiSync instance
+    unsigned int channel;                       // Channel index
+    bool frame_detected;                        // Frame detected indicator
+    std::vector<float> cfo;                     // carrier frequency offsets estimated per sample 
+    std::vector<Sample_t> cfr;                  // channel frequency response 
 };
 
 // callback function
-//  _X          : array of received subcarrier samples [size: _M x 1]
-//  _p          : subcarrier allocation array [size: _M x 1]
-//  _M          : number of subcarriers
-//  _userdata   : user-defined data pointer
-static int callback(Sample_t* _X, unsigned char * _p, unsigned int _M, void * _cb_data){
-    // Add symbols from all subcarriers to buffer 
-    for (unsigned int i = 0; i < _M; ++i) {
-        // ignore 'null' and 'pilot' subcarriers
-        if (_p[i] != OFDMFRAME_SCTYPE_DATA)
-            continue;
-        static_cast<callback_data*>(_cb_data)->buffer.push_back(_X[i]);  
-    }
-// No Reset after returning the first data symbol (return 0)
-return 0;
+static int callback(void * _cb_data){
+            CallbackData_t& cb = *static_cast<CallbackData_t*>(_cb_data);
+            cb.frame_detected = true;
+
+            // Add samples to callback-data buffer
+            cb.ms_ptr->GetFrameSamps(cb.channel, &cb.frame_samps.samples);   // ofdmframesync return CFR as Frame samples (standardized function signature required for sync_worker) -> TODO: Add GetCFR function and add CFR to callback-data buffer
+
+            // Add data symbols to callback-data buffer 
+            cb.ms_ptr->GetFrameSyms(cb.channel, &cb.frame_syms.symbols);
+
+            // Reset synchronizer after returning the first data symbol (return 1)
+            return 1;
 }
 
 // main function
@@ -188,7 +189,7 @@ int main(int argc, char*argv[])
     InsertSequence(tx_long.data(), tx.data(), FRAME_START, n);
 
     // Apply channel impairments and delay to the generated signal
-    std::vector<std::vector<std::complex<float>>> rx(NUM_CHANNELS);                 // Complex baseband signal buffer for all channels (received sequence)
+    Samples_2dim_t rx(NUM_CHANNELS);                                                // Complex baseband signal buffer for all channels (received sequence)
     for (unsigned int i = 0; i < NUM_CHANNELS; ++i) {
         std::vector<Sample_t> rx_ch(NUM_SAMPLES);                                   // Complex baseband signal buffer for single channel (received sequence)  
 
@@ -213,29 +214,32 @@ int main(int argc, char*argv[])
     // Destroy reference channel 
     channel_cccf_destroy(base_channel);
 
-    
     // ----------------- Synchronization ----------------------
-    struct callback_data cb_data[NUM_CHANNELS];                 // Callback data buffer 
-    void* userdata[NUM_CHANNELS];                               // Pointers to callback data buffer for each channel 
-
-    // Array of Pointers to CB-Data 
-    for (unsigned int i = 0; i < NUM_CHANNELS; ++i)
-        userdata[i] = &cb_data[i];
+    CallbackData_t cb_data;                 // Callback data buffer 
+    std::array<FrameSyms_t, NUM_CHANNELS> frame_syms;
+    std::array<FrameSamps_t, NUM_CHANNELS> frame_samps;
 
     // Create multi-channel frame synchronizer
-    MultiSync<ofdmframesync_iface> ms(NUM_CHANNELS, {M, cp_len, taper_len, p}, callback, userdata);
+    MultiSync<ofdmframesync_iface> ms(NUM_CHANNELS, {M, cp_len, taper_len, p}, callback, &cb_data);
+    cb_data.ms_ptr = &ms;
 
     // Samplewise synchronization of each channel (MultiSync processes whole buffer, in this case we want to limit the buffer to only one sample)
-    std::vector<std::complex<float>> rx_sample(1);          // Buffer to hold current sample for sample-by-sample processing
-    for (unsigned int i = 0; i < NUM_SAMPLES; ++i) {
-        for (unsigned int j = 0; j < NUM_CHANNELS; ++j){
-            rx_sample[0]= rx[j][i];                         // Get the current sample of the j-th channel
-            ms.Execute(j, &rx_sample);                      // Execute the synchronizer for j-th channel 
+    for (unsigned int ch = 0; ch < NUM_CHANNELS; ++ch) {
+        // Clear callback-data buffer
+        cb_data.frame_samps.samples.clear();  
+        cb_data.frame_syms.symbols.clear();      
+        cb_data.frame_detected = false;          
+        cb_data.channel = ch; 
 
-            // Store the CFR of all channels (only once)
-            if (cb_data[j].buffer.size() && !cb_data[j].cfr.size()){
-                ms.GetFrameSamps(j, &cb_data[j].cfr); 
-            };
+        // Execute Synchronizer 
+        ms.Execute(ch, &rx[ch]);          
+            
+        // Process callback-data 
+        if (cb_data.frame_detected) {    
+                cb_data.frame_samps.channel = ch; 
+                cb_data.frame_syms.channel = ch;  
+                frame_samps[ch] = cb_data.frame_samps;    
+                frame_syms[ch] = cb_data.frame_syms;          
         };
     };
 
@@ -247,8 +251,8 @@ int main(int argc, char*argv[])
         std::string ch_suffix = std::to_string(ch);
 
         m_file.Add(rx[ch], "x_" + ch_suffix)                        // Add received signal to MATLAB file  
-            .Add(cb_data[ch].buffer, "datasymbols_" + ch_suffix)    // Add detected symbols to MATLAB file
-            .Add(cb_data[ch].cfr, "cfr_" + ch_suffix);              // Add estimated CFR to MATLAB file
+            .Add(frame_syms[ch].symbols, "datasymbols_" + std::to_string(frame_syms[ch].channel))         // Add detected symbols to MATLAB file
+            .Add(frame_samps[ch].samples, "cfr_" + std::to_string(frame_samps[ch].channel));              // Add estimated CFR to MATLAB file
     }
 
     // Initialize legend labels
