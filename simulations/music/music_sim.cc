@@ -24,6 +24,7 @@
  #include <zmq_if.h>
  #include <matlab_if.h>
  #include <signal_generator.h>
+ #include <ui_worker.h>
 
 using namespace doa4rfc;
 
@@ -271,6 +272,10 @@ int main(int argc, char*argv[])
     channel_cccf_destroy(base_channel);
 
 
+    // ---------------------- Terminal Worker ----------------------
+    TerminalWorker terminal(stop_signal_called);
+    terminal.SetPhaseCorrQueue(sync.GetPhaseCorrQueue());
+
     // ---------------------- Run Workers ----------------------
     sync.RunWorker();   
     grouping_worker.RunWorker();
@@ -278,6 +283,7 @@ int main(int argc, char*argv[])
     zmq_tx_external_worker.RunWorker();
     zmq_rx_worker.RunWorker();
     zmq_tx_worker.RunWorker();
+    terminal.RunWorker();
     std::cout << "Started Workers..." << std::endl;
 
     // Wait 3 sec...
@@ -286,9 +292,12 @@ int main(int argc, char*argv[])
     // Add generated Frame to queue for transmission to doa4rfc 
     zmq_tx_external_worker.PushItemToQueue(tx_queue_external, std::move(rx));
     
-    // Wait 5 sec...
-    std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+    // Wait until program is exited by user... 
+    while (!stop_signal_called.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    }
 
+    terminal.StopWorker();
     sync.StopWorker();
     grouping_worker.StopWorker();
     matlab_worker.StopWorker();

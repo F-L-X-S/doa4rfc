@@ -262,20 +262,23 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     ZmqTxWorker zmq_tx_worker(EXPORT_INTERFACE, tx_queue, stop_signal_called);
     grouping_worker.AddMultiChSampsQueue(std::ref(tx_queue));           // Add tx workers input queue as grouping worker output queue
 
-    // ---------------------- Configure Terminal workers ----------------------
-    std::thread t4(terminal_worker, std::ref(*sync.GetPhaseCorrQueue()), std::ref(stop_signal_called));
+    // ---------------------- Configure Terminal worker ----------------------
+    TerminalWorker terminal(stop_signal_called);
+    terminal.SetPhaseCorrQueue(sync.GetPhaseCorrQueue());
 
     // ---------------------- Continue in main thread ----------------------
-    sync.RunWorker();   
+    sync.RunWorker();
     grouping_worker.RunWorker();
     matlab_worker.RunWorker();
     zmq_tx_worker.RunWorker();
+    terminal.RunWorker();
     std::cout << "Started Receiving..." << std::endl;
 
     while (!stop_signal_called.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
 
+    terminal.StopWorker();
     sync.StopWorker();
     grouping_worker.StopWorker();
     matlab_worker.StopWorker();
@@ -285,7 +288,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     t1.join();
     t2.join();
     t3.join();
-    t4.join();
 
     std::cout << "Stopped receiving...\n" << std::endl;
 

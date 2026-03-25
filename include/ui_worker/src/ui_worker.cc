@@ -1,61 +1,88 @@
 /**
- * @file ui_worker.h
+ * @file ui_worker.cc
  * @author Felix Schuelke (flxscode@gmail.com)
- * 
- * @brief 
- * @version 0.1
- * @date 2025-12-27
- * 
- * 
+ *
+ * @brief Terminal-based UI worker with extensible command registry
+ * @version 0.2
+ * @date 2026-03-25
+ *
+ *
  */
 
 #include <ui_worker.h>
 
-/**
- * @brief terminal_worker reads terminal inputs. 
- * Possible commands:
- * adjust_phase <channel> <phase in rad> : push phase correction for the specified channel to the phi_error_queue 
- * exit : terminate program
- * q : terminate program
- * quit : terminate program
- * 
- * @param phi_error_queue Reference to the thread-safe queue to send phase corrections for channel synchronizers
- * @param stop_signal_called Stop signal to terminate the program
- */
-void terminal_worker(    PhaseQueue_t& phi_error_queue,
-                        std::atomic<bool>& stop_signal_called) {
-    
-    while (!stop_signal_called.load()) {
-        // Read User Input 
-        std::string input;
-        std::getline(std::cin, input);
+TerminalWorker::TerminalWorker(std::atomic<bool>& stop_signal_ref):
+    MultithreadWorker(stop_signal_ref)
+{
+    RegisterBuiltinCommands();
+};
 
-        // Parse single token commands 
-        if (input == "exit" || input == "quit" || input == "q") {
-            stop_signal_called.store(true);
+TerminalWorker::~TerminalWorker(){};
+
+void TerminalWorker::RegisterCommand(const std::string& name, Command cmd) {
+    commands_[name] = std::move(cmd);
+};
+
+void TerminalWorker::SetPhaseCorrQueue(PhaseQueue_t* queue) {
+    phase_queue_ = queue;
+};
+
+void TerminalWorker::Execute() {
+    while (!stop_signal_called->load()) {
+        std::string input;
+        if (!std::getline(std::cin, input)) break;
+
+        std::vector<std::string> tokens;
+        boost::split(tokens, input, boost::is_any_of(" "), boost::token_compress_on);
+        if (tokens.empty() || tokens[0].empty()) continue;
+
+        if (tokens[0] == "exit" || tokens[0] == "quit" || tokens[0] == "q") {
+            stop_signal_called->store(true);
             break;
         }
 
-        // Parse multi token commands 
-        std::vector<std::string> tokens;
-        boost::split(tokens, input, boost::is_any_of(" "));
-
-        // Adjust NCO phase for a specific channel
-        if (tokens.size() == 3 && tokens[0] == "adjust_phase") {
-            // Set NCO phase for a specific channel
-            unsigned int channel_id = std::stoi(tokens[1]);
-                Phase_t phase_data;
-                phase_data.channel = channel_id;
-                phase_data.phi = static_cast<float>(std::stod(tokens[2]));
-                {
-                    std::lock_guard<std::mutex> lock_phi(phi_error_queue.mtx);
-                    phi_error_queue.queue.push(std::move(phase_data));
-                }
-                phi_error_queue.cv.notify_one();
-            
-        } else {
-            std::cerr << "Unknown command: " << input << std::endl;
+        auto it = commands_.find(tokens[0]);
+        if (it == commands_.end()) {
+            std::cerr << "Unknown command: " << tokens[0]
+                      << ". Type 'help' for available commands." << std::endl;
+            continue;
         }
 
+        if (tokens.size() < it->second.min_args) {
+            std::cerr << "Usage: " << it->second.usage << std::endl;
+            continue;
+        }
+
+        auto err = it->second.handler(tokens);
+        if (!err.empty()) std::cerr << "Error: " << err << std::endl;
     }
-}
+};
+
+void TerminalWorker::RegisterBuiltinCommands() {
+    RegisterCommand("help", {
+        .usage = "help",
+        .description = "List available commands",
+        .min_args = 1,
+        .handler = [this](const std::vector<std::string>&) -> std::string {
+            std::cout << "Available commands:" << std::endl;
+            for (const auto& [name, cmd] : commands_)
+                std::cout << "  " << cmd.usage << " — " << cmd.description << std::endl;
+            std::cout << "  exit | quit | q — Terminate program" << std::endl;
+            return "";
+        }
+    });
+
+    RegisterCommand("adjust_phase", {
+        .usage = "adjust_phase <channel> <phase_rad>",
+        .description = "Adjust phaseshift for a specific channel applied by the internal channel NCO",
+        .min_args = 3,
+        .handler = [this](const std::vector<std::string>& tokens) -> std::string {
+            if (!phase_queue_) return "No phase correction queue connected";
+            Phase_t p;
+            p.channel = std::stoi(tokens[1]);
+            p.phi = static_cast<float>(std::stod(tokens[2]));
+            PushItemToQueue(*phase_queue_, std::move(p));
+            return "";
+        }
+    });
+};
