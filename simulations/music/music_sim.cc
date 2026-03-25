@@ -283,7 +283,7 @@ int main(int argc, char*argv[])
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
     // Add generated Frame to queue for transmission to doa4rfc 
-    zmq_tx_external_worker.PushItemToQueue<Samples_2dim_t>(tx_queue_external, std::move(rx));
+    zmq_tx_external_worker.PushItemToQueue(tx_queue_external, std::move(rx));
     
     // Wait 5 sec...
     std::this_thread::sleep_for(std::chrono::milliseconds(5000));

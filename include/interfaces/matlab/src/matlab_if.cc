@@ -55,8 +55,8 @@ void MatlabWorker::Execute() {
         // Non-blocking pop from queues to buffers
         std::vector<Samples_2dim_t> multich_samps_buffer;
         std::vector<Symbols_2dim_t> multich_syms_buffer;
-        if (0 == PopBatchFromQueue<Samples_2dim_t>(multich_samps_queue_, multich_samps_buffer, 0) &&
-            0 == PopBatchFromQueue<Symbols_2dim_t>(multich_syms_queue_, multich_syms_buffer, 0)) {
+        if (0 == PopBatchFromQueue(multich_samps_queue_, multich_samps_buffer, 0) &&
+            0 == PopBatchFromQueue(multich_syms_queue_, multich_syms_buffer, 0)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10)); // Avoid busy-waiting when no channel has data
             continue;   // No samples available
         }

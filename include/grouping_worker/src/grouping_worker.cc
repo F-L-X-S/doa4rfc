@@ -79,8 +79,8 @@ void GroupingWorker::Execute() {
         // Non-blocking pop from queues to buffers
         std::vector<FrameSamps_t> frame_samps_buffer;
         std::vector<FrameSyms_t>  frame_syms_buffer;
-        if (0 == PopBatchFromQueue<FrameSamps_t>(frame_samps_queue_, frame_samps_buffer, 0) &&
-            0 == PopBatchFromQueue<FrameSyms_t>(frame_syms_queue_, frame_syms_buffer, 0)) {
+        if (0 == PopBatchFromQueue(frame_samps_queue_, frame_samps_buffer, 0) &&
+            0 == PopBatchFromQueue(frame_syms_queue_, frame_syms_buffer, 0)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10)); // Avoid busy-waiting when no channel has data
             continue;   // No samples available
         }
@@ -142,14 +142,14 @@ void GroupingWorker::ExportGroups(std::vector<T>& buffer) {
                 for (const auto& item : group)
                     multich_data[item->channel] = item->samples;
                 if (multich_samps_queue_)
-                    PushItemToQueue<Samples_2dim_t>(*multich_samps_queue_, std::move(multich_data));
+                    PushItemToQueue(*multich_samps_queue_, std::move(multich_data));
 
             } else if constexpr (std::is_same_v<T, FrameSyms_t>) {
                 Symbols_2dim_t multich_data(num_channels_);
                 for (const auto& item : group)
                     multich_data[item->channel] = item->symbols;
                 if (multich_syms_queue_)
-                    PushItemToQueue<Symbols_2dim_t>(*multich_syms_queue_, std::move(multich_data));
+                    PushItemToQueue(*multich_syms_queue_, std::move(multich_data));
             }
 
             // Remove processed entries

@@ -106,19 +106,19 @@ class ZmqRxWorker: public MultithreadWorker{
 
                 if constexpr (std::is_same_v<rx_item_t, Samples_3dim_t>) {
                     // Forward entire received block directly (same type)
-                    PushItemToQueue<Samples_3dim_t>(rx_queues_.at(0), std::move(received));
+                    PushItemToQueue(rx_queues_.at(0), std::move(received));
 
                 } else if constexpr (std::is_same_v<rx_item_t, Samples_2dim_t>) {
                     // Each measurement is a Samples_2dim_t {channel, samples}, forward separately
                     for (auto& measurement : received) {
-                        PushItemToQueue<Samples_2dim_t>(rx_queues_.at(0), std::move(measurement));
+                        PushItemToQueue(rx_queues_.at(0), std::move(measurement));
                     }
 
                 } else if constexpr (std::is_same_v<rx_item_t, Samples_1dim_t>) {
                     // i-th queue transports the samples of the i-th channel
                     for (auto& measurement : received) {
                         for (unsigned int i = 0; i < num_queues; ++i) {
-                            PushItemToQueue<Samples_1dim_t>(rx_queues_.at(i), std::move(measurement[i]));
+                            PushItemToQueue(rx_queues_.at(i), std::move(measurement[i]));
                         }
                     }
 
@@ -131,7 +131,7 @@ class ZmqRxWorker: public MultithreadWorker{
                             SampleBlock_t block;
                             block.samples = std::move(measurement[i]);
                             block.timestamp = timestamp;
-                            PushItemToQueue<SampleBlock_t>(rx_queues_.at(i), std::move(block));
+                            PushItemToQueue(rx_queues_.at(i), std::move(block));
                         }
                     }
 
@@ -199,7 +199,7 @@ class ZmqTxWorker: public MultithreadWorker{
                 // Pop items from tx queue
                 std::vector<tx_item_t> buffer;
                 size_t num_popped = 0;
-                num_popped = PopBatchFromQueue<tx_item_t>(tx_queue_, buffer);
+                num_popped = PopBatchFromQueue(tx_queue_, buffer);
                 if (num_popped == 0) continue;
 
                 // Send item via ZMQ

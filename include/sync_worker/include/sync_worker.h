@@ -174,7 +174,7 @@ class SyncWorker: public MultithreadWorker {
 
                 // Process Phase Correction to adjust NCO phase for the channel
                 Phase_t phi_corr;
-                if (PopItemFromQueue<Phase_t>(phi_corr_queue_, phi_corr)){
+                if (PopItemFromQueue(phi_corr_queue_, phi_corr)){
                     std::cout<< "Adjusted NCO of CH"<< phi_corr.channel<<" from"<< ms_.GetNcoPhase(phi_corr.channel)<<" rad";
                     ms_.AdjustNcoPhase(phi_corr.channel, phi_corr.phi);  // Adjust NCO phase for the channel
                     std::cout<< "to "<< ms_.GetNcoPhase(phi_corr.channel)<<" rad!"<<std::endl;
@@ -186,7 +186,7 @@ class SyncWorker: public MultithreadWorker {
                         rx_blocks.clear();
 
                         // Non-blocking pop from channel queue
-                        if (0 == PopBatchFromQueue<SampleBlock_t>(rx_queues_[i], rx_blocks, 0))
+                        if (0 == PopBatchFromQueue(rx_queues_[i], rx_blocks, 0))
                             continue;   // No samples available, skip channel
 
                         any_data = true;
@@ -198,12 +198,12 @@ class SyncWorker: public MultithreadWorker {
 
                         // Push Frame-Samples to queue
                         if (frame_samps_queue_ && !frame_samps_.empty()){
-                            PushBatchToQueue<FrameSamps_t>(*frame_samps_queue_, frame_samps_);
+                            PushBatchToQueue(*frame_samps_queue_, frame_samps_);
                         };
 
                         // Push Frame-Symbols to queue
                         if (frame_syms_queue_ && !frame_syms_.empty()){
-                            PushBatchToQueue<FrameSyms_t>(*frame_syms_queue_, frame_syms_);
+                            PushBatchToQueue(*frame_syms_queue_, frame_syms_);
                         };
 
                 }; // for i num_channels

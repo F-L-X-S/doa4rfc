@@ -21,6 +21,7 @@
 #include <vector>
 #include <thread>
 #include <chrono>
+#include <type_traits>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
@@ -82,9 +83,9 @@ class MultithreadWorker {
          * @param item Item to push to the queue
          */
         template <typename queue_item_t>
-        void PushItemToQueue(ThreadSafeQueue<queue_item_t>& q ,queue_item_t&& item) {
+        void PushItemToQueue(ThreadSafeQueue<queue_item_t>& q , std::type_identity_t<queue_item_t>&& item) {
             std::lock_guard<std::mutex> lock(q.mtx);
-            q.queue.push(std::forward<queue_item_t>(item));                            
+            q.queue.push(std::move(item));
             q.cv.notify_one();
         };
 
@@ -96,7 +97,7 @@ class MultithreadWorker {
          * @param buffer Vector containing the items to push to the queue
          */
         template <typename queue_item_t>
-        void PushBatchToQueue(ThreadSafeQueue<queue_item_t>& q , std::vector<queue_item_t>& buffer) {
+        void PushBatchToQueue(ThreadSafeQueue<queue_item_t>& q , std::vector<std::type_identity_t<queue_item_t>>& buffer) {
             std::lock_guard<std::mutex> lock(q.mtx);
             while (!buffer.empty()) {
                 q.queue.push(std::move(buffer.back()));
@@ -115,7 +116,7 @@ class MultithreadWorker {
          * @return bool Indicator, if an Item was popped from the queue
          */
         template <typename queue_item_t>
-        bool PopItemFromQueue(ThreadSafeQueue<queue_item_t>& q, queue_item_t& buffer, unsigned int timeout_ms = 100) {
+        bool PopItemFromQueue(ThreadSafeQueue<queue_item_t>& q, std::type_identity_t<queue_item_t>& buffer, unsigned int timeout_ms = 100) {
                 std::unique_lock<std::mutex> lock(q.mtx);
                 if (timeout_ms > 0) {
                     q.cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&q, this] {
@@ -142,7 +143,7 @@ class MultithreadWorker {
          * @return size_t Number of items actually popped from the queue
          */
         template <typename queue_item_t>
-        size_t PopItemFromQueue(ThreadSafeQueue<queue_item_t>& q, std::vector<queue_item_t>& buffer, size_t max_items, unsigned int timeout_ms = 100) {
+        size_t PopItemFromQueue(ThreadSafeQueue<queue_item_t>& q, std::vector<std::type_identity_t<queue_item_t>>& buffer, size_t max_items, unsigned int timeout_ms = 100) {
                 std::unique_lock<std::mutex> lock(q.mtx);
                 if (timeout_ms > 0) {
                     q.cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&q, this] {
@@ -169,7 +170,7 @@ class MultithreadWorker {
          * @return size_t Number of items actually popped from the queue
          */
         template <typename queue_item_t>
-        size_t PopBatchFromQueue(ThreadSafeQueue<queue_item_t>& q, std::vector<queue_item_t>& buffer, unsigned int timeout_ms = 100) {
+        size_t PopBatchFromQueue(ThreadSafeQueue<queue_item_t>& q, std::vector<std::type_identity_t<queue_item_t>>& buffer, unsigned int timeout_ms = 100) {
                 std::unique_lock<std::mutex> lock(q.mtx);
                 if (timeout_ms > 0) {
                     q.cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&q, this] {
