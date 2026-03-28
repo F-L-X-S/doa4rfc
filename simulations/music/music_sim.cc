@@ -154,11 +154,8 @@ int main(int argc, char*argv[])
     fgprops.fec0        = FEC0;
     fgprops.fec1        = FEC1;
 
-    // Assemble frame and write samples to transmit buffer
-    #ifdef OFDMFRAME    
-       ofdmflexframegen fg = ofdmflexframegen_create(M,cp_len,taper_len,p,&fgprops);
-
-        // initialize header/payload and assemble frame
+    
+    // initialize header/payload and assemble frame
         unsigned int i;
         unsigned char header[8];
         unsigned char payload[PAYLOAD_LEN];
@@ -166,6 +163,10 @@ int main(int argc, char*argv[])
             header[i] = i & 0xff;
         for (i=0; i<PAYLOAD_LEN; i++)
             payload[i] = rand() & 0xff;
+
+    // Assemble frame and write samples to transmit buffer
+    #ifdef OFDMFRAME    
+        ofdmflexframegen fg = ofdmflexframegen_create(M,cp_len,taper_len,p,&fgprops);
         ofdmflexframegen_assemble(fg, header, payload, PAYLOAD_LEN);
 
         // Complex baseband signal buffer (transmitted sequence)
@@ -189,7 +190,7 @@ int main(int argc, char*argv[])
         flexframegen fg = flexframegen_create(&fgprops);
 
         // assemble frame with default payload (NULL-ptr)
-        flexframegen_assemble(fg, NULL, NULL, PAYLOAD_LEN);
+        flexframegen_assemble(fg, header, payload, PAYLOAD_LEN);
 
         // Complex baseband signal buffer (transmitted sequence)
         unsigned int frame_len = flexframegen_getframelen(fg);
