@@ -173,7 +173,6 @@ struct SyncTraits<ofdmframesync> {
 
     /**
      * @brief Wrapper function to get sample of the last frame received by the frame synchronizer.
-     * Here the CFR (Channel Frequency Response is used insted of time-domain samples) (frequency correlation equals timedomain correlation). 
      * 
      * The function is called within the user defined callback function 
      * 
@@ -184,7 +183,7 @@ struct SyncTraits<ofdmframesync> {
     static unsigned int GetFrameSamp(SynchronizerType fs, Sample_t* _x, unsigned int _pos) 
     {
         liquid_float_complex* _x_liquid = liquid_conv::Ptr(_x);
-        return ofdmframesync_get_cfr(fs, _x_liquid, _pos);
+        return ofdmframesync_get_frame_samp(fs, _x_liquid, _pos);
     };
 
     /**
@@ -208,6 +207,137 @@ struct SyncTraits<ofdmframesync> {
  * 
  */
 using ofdmframesync_iface = SyncTraits<ofdmframesync>;
+
+
+// -------------------- Flexible OFDM Frame Synchronizer --------------------
+
+/**
+ * @brief SyncTraits specialization for the flexible ofdm frame synchronizer ofdmflexframesync.
+ * Defines the functions (Create, Reset, Execute, Destroy, GetFrameSamps) for the flexible frame synchronizer.
+ * 
+ * flexframesync documentation: https://liquidsdr.org/doc/tutorial-ofdmflexframe/
+ * 
+ * @tparam  Synchronizer type
+ */
+
+template<>
+struct SyncTraits<ofdmflexframesync> {
+
+    /**
+     * @brief Define the type of the synchronizer
+     * 
+     */
+    using SynchronizerType = ofdmflexframesync;
+
+    /**
+     * @brief Define the Parameters for the frame synchronizer Create function
+     * 
+     */
+    struct CreateParams_t {
+        unsigned int M;           // number of subcarriers
+        unsigned int cp_len;      // cyclic prefix length
+        unsigned int taper_len;   // taper length
+        unsigned char * p;        // modulation scheme
+    };
+
+    /**
+     * @brief C-compatible callback matching framesync_callback signature.
+     * Extracts CallbackWrapper from userdata and forwards to generic handler.
+     */
+    static int Callback(unsigned char *  _header,
+                        int              _header_valid,
+                        unsigned char *  _payload,
+                        unsigned int     _payload_len,
+                        int              _payload_valid,
+                        framesyncstats_s _stats,
+                        void *           _userdata)
+    {
+        auto* w = static_cast<CallbackWrapper*>(_userdata);
+        return w->handler(w->userdata);
+    };
+
+    /**
+     * @brief Wrapper function to create a frame synchronizer
+     *
+     * @param params Synchronizer parameters
+     * @param wrapper CallbackWrapper containing generic handler and real userdata
+     * @return SynchronizerType Created synchronizer instance
+     */
+    static SynchronizerType Create(const CreateParams_t& params, CallbackWrapper* wrapper)
+    {
+        return ofdmflexframesync_create(params.M, params.cp_len, params.taper_len, params.p, Callback, wrapper);
+    };
+
+    /**
+     * @brief Wrapper function to reset a frame synchronizer
+     * 
+     * @param fs 
+     */
+    static void Reset(SynchronizerType fs) 
+    {
+        ofdmflexframesync_reset(fs);
+    };
+
+    /**
+     * @brief Wrapper function to execute a frame synchronizer
+     * 
+     * @param fs Pointer to the synchronizer
+     * @param x Pointer to the input samples array
+     * @param n Number of input samples to read
+     * @return int Result of the execution
+     */
+    static int Execute(SynchronizerType fs, Sample_t* x, unsigned int n) 
+    {
+        return ofdmflexframesync_execute(fs, reinterpret_cast<liquid_float_complex*>(x), n);
+    };
+
+    /**
+     * @brief Wrapper function to destroy a frame synchronizer
+     * 
+     * @param fs Pointer to the synchronizer
+     */
+    static void Destroy(SynchronizerType fs) 
+    {
+        ofdmflexframesync_destroy(fs);
+    };
+
+    /**
+     * @brief Wrapper function to get sample of the last frame received by the frame synchronizer.
+     * 
+     * The function is called within the user defined callback function 
+     * 
+     * @param fs Pointer to the synchronizer
+     * @param _x buffer to store the sample on 
+     * @param _pos Index of buffer position to read
+     */
+    static unsigned int GetFrameSamp(SynchronizerType fs, Sample_t* _x, unsigned int _pos) 
+    {
+        liquid_float_complex* _x_liquid = liquid_conv::Ptr(_x);
+        return ofdmflexframesync_get_frame_samp(fs, _x_liquid, _pos);
+    };
+
+    /**
+     * @brief Wrapper function to get symbol of the last frame received by the frame synchronizer. 
+     * 
+     * The function is called within the user defined callback function 
+     * 
+     * @param fs Pointer to the synchronizer
+     * @param _x buffer to store the symbol on 
+     * @param _pos Index of buffer position to read
+     */
+    static unsigned int GetFrameSym(SynchronizerType fs, Symbol_t* _x, unsigned int _pos) 
+    {
+        liquid_float_complex* _x_liquid = liquid_conv::Ptr(_x);
+        return ofdmflexframesync_get_sym(fs, _x_liquid, _pos);
+    };
+};
+
+/**
+ * @brief Define typename for flexible frame synchronizer interface
+ * 
+ */
+using ofdmflexframesync_iface = SyncTraits<ofdmflexframesync>;
+
 
 // -------------------- Flexible Single-Carrier Frame Synchronizer --------------------
 
