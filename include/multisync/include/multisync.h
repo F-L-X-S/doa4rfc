@@ -48,7 +48,7 @@
  * 
  * @tparam synchronizer_type Liquid-DSP frame synchronizer type 
  */
-template<SyncTraitsConcept synchronizer_interface, unsigned int num_channels>          
+template<SyncTraitsConcept synchronizer_interface, std::size_t num_channels>          
 class MultiSync {
 public:
 
@@ -147,7 +147,7 @@ public:
                 {
                     // Process each channel's sample
                     for (unsigned int ch = 0; ch < num_channels; ++ch) {
-                        Sample_t* s = channel_samples[ch];
+                        Sample_t* s = &channel_samples[ch];
 
                         // Apply phase offset to the sample
                         nco_crcf_mix_up(nco_[ch],
@@ -159,9 +159,9 @@ public:
 
                         // Append the sample to the appropriate recording buffer
                         if (recording_) {
-                            frame_buf_[ch].push(s);
+                            frame_buf_[ch].push_back(*s);
                         } else {
-                            accum_buf_[ch].push(s);
+                            accum_buf_[ch].push_back(*s);
                         }
                     }
 
