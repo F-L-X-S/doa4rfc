@@ -36,6 +36,7 @@
 #include <vector>
 #include <liquid.h>
 #include <synctraits.h>
+#include <doa4rfc.h>
 
 #define DATA_WRITTEN 1
 #define INDEX_OUT_OF_BOUND 0
@@ -150,9 +151,7 @@ public:
                         Sample_t* s = &channel_samples[ch];
 
                         // Apply phase offset to the sample
-                        nco_crcf_mix_up(nco_[ch],
-                            reinterpret_cast<liquid_float_complex*>(s),
-                            reinterpret_cast<liquid_float_complex*>(s));
+                        nco_crcf_mix_up(nco_[ch], liquid_conv::Val(*s), liquid_conv::Ptr(s));
 
                         // Run the synchronizer on the block (may trigger callback)
                         synchronizer_interface::Execute(framesync_[ch], s, 1);
