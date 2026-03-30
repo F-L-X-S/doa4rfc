@@ -12,10 +12,12 @@
 #ifndef SYNCWORKER_H
 #define SYNCWORKER_H     
 
-#include <queue>       
-#include <mutex>                    
-#include <condition_variable>         
-#include <string>              
+#include <deque>
+#include <limits>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <string>
 #include <atomic>
 
 #include <boost/algorithm/string.hpp>
@@ -83,12 +85,12 @@ using namespace sync_worker_queues;
 template <std::size_t num_channels, typename synchronizer_iface>
 class SyncWorker: public MultithreadWorker {
     public:
-        using MsCreateParams_t = MultiSync<synchronizer_iface>::CreateParams_t;
+        using MsCreateParams_t = MultiSync<synchronizer_iface, num_channels>::CreateParams_t;
 
         SyncWorker(const MsCreateParams_t&   synchronizer_params,
                     std::atomic<bool>&          stop_signal_ref):
                         MultithreadWorker(stop_signal_ref),
-                        ms_(num_channels, synchronizer_params, callback, &cb_data_) {
+                        ms_(synchronizer_params, callback, &cb_data_) {
                             frame_samps_queue_ = nullptr;
                             frame_syms_queue_ = nullptr;
                             cb_data_.ms_ptr = &ms_;
@@ -160,22 +162,25 @@ class SyncWorker: public MultithreadWorker {
         };
 
         /**
-         * @brief The Execute function continuously retrieves timestamped samples from the channel-specific rx-queues as rx-blocks and 
-         * executes the synchronization algorithm on these samples through the MultiSync instance. 
-         * When a frame is detected by a channel’s synchronizer, the resulting sample-block and associated callback data are pushed into 
-         * thread-safe queues for use in subsequent processing stages. 
-         * The queued data is tagged with the timestamp and the channel number of the synchronized sample-block, in which the frame was detected.
-         * 
-         * Throughout the synchronization process, phase corrections can be applied to the NCOs of the MultiSync instance to compensate 
-         * the phase errors introduced by the hardware instances.
-         * 
+         * @brief Continuously retrieves sample-blocks from the channel-specific rx-queues and
+         * executes the synchronization algorithm sample-by-sample across all channels in lockstep
+         * (ch 0 sample[s], ch 1 sample[s], … before advancing to sample[s+1]).
+         *
+         * Recording lifecycle (driven by DetectFrame / MultiSync):
+         *   - Normally record_index_ == 0: MultiSync accumulates a rolling history per channel.
+         *   - When a frame is detected, record_index_ is set to frame_len, opening a recording
+         *     window in MultiSync that trims all channels' histories to the last frame_len samples
+         *     and then continues accumulating.
+         *   - After record_countdown_ lockstep steps, record_index_ is set back to 0, which causes
+         *     MultiSync to close the recording window on the very next Execute() call.
+         *   - snapshot_pending_ flags this transition; the complete multi-channel snapshot is read
+         *     from MultiSync, pushed to frame_samps_queue_, and the buffer is cleared.
+         *
          * This function is executed within a dedicated thread.
-         * 
-         * @param stop_signal_called Stop signal to terminate the thread
          */
         void Execute() override final {
-            std::vector<SampleBlock_t> rx_blocks;               // Blocks of samples retrieved from a channels rx-queue
-            unsigned int i, j;
+            // Per-channel deques of incoming sample-blocks (O(1) front removal)
+            std::array<std::deque<SampleBlock_t>, num_channels> rx_block_buf;
             bool any_data;
 
             while (!stop_signal_called->load()) {
@@ -200,54 +205,86 @@ class SyncWorker: public MultithreadWorker {
                     for (std::size_t ch = 0; ch < num_channels; ++ch) {
                         std::cout << "  CH" << ch << ": " << ms_.GetNcoPhase(ch) << " rad" << std::endl;
                     }
-                };
+                }
 
-                // Process all channels non-blockingly
+                // Collect newly available blocks for every channel
                 any_data = false;
-                for (i = 0; i < num_channels; ++i) {
-                        rx_blocks.clear();
-
-                        // Non-blocking pop from channel queue
-                        if (0 == PopBatchFromQueue(rx_queues_[i], rx_blocks, 0))
-                            continue;   // No samples available, skip channel
-
+                for (unsigned int ch = 0; ch < num_channels; ++ch) {
+                    std::vector<SampleBlock_t> new_blocks;
+                    if (PopBatchFromQueue(rx_queues_[ch], new_blocks, 0) > 0) {
+                        for (auto& b : new_blocks)
+                            rx_block_buf[ch].push_back(std::move(b));
                         any_data = true;
+                    }
+                }
 
-                        // Detect Packets
-                        for (j = 0; j < rx_blocks.size(); ++j) {
-                            DetectFrame(rx_blocks[j], i);
-                        };
+                // Process in lockstep: ch0_s[i], ch1_s[i], … before advancing to sample i+1.
+                // Only steps if every channel has at least one buffered block.
+                bool all_have_data = true;
+                while (all_have_data) {
+                    // Check if every channel has at least one block buffered; if not, wait for more data to arrive
+                    for (unsigned int ch = 0; ch < num_channels; ++ch) {
+                        if (rx_block_buf[ch].empty()) { all_have_data = false; break; }
+                    }
+                    if (!all_have_data) break;
 
-                        // Push Frame-Samples to queue
-                        if (frame_samps_queue_ && !frame_samps_.empty()){
-                            PushBatchToQueue(*frame_samps_queue_, frame_samps_);
-                        };
+                    // Process as many samples as the smallest front-block allows
+                    std::size_t min_samps = std::numeric_limits<std::size_t>::max();
+                    for (unsigned int ch = 0; ch < num_channels; ++ch)
+                        min_samps = std::min(min_samps, rx_block_buf[ch].front().samples.size());
 
-                        // Push Frame-Symbols to queue
-                        if (frame_syms_queue_ && !frame_syms_.empty()){
-                            PushBatchToQueue(*frame_syms_queue_, frame_syms_);
-                        };
+                    for (std::size_t s = 0; s < min_samps; ++s) {
+                        std::array<Sample_t, num_channels> channel_samples;
+                        for (unsigned int ch = 0; ch < num_channels; ++ch)
+                            channel_samples[ch] = rx_block_buf[ch].front().samples[s];
+                        uint64_t timestamp = rx_block_buf[0].front().timestamp; // Assuming aligned timestamps across channels
+                        DetectFrame(channel_samples, timestamp);
+                        
+                        // After every complete lockstep step, advance the recording countdown.
+                        // Only decrement when actively recording to avoid unsigned underflow.
+                        // When it reaches zero, signal MultiSync to close the window on the next call.
+                        if (record_countdown_ > 0) {
+                            record_countdown_--;
+                            if (record_countdown_ == 0) {
+                                record_index_     = 0;
+                                snapshot_pending_ = true;   // Snapshot completes on next Execute() transition
+                                std::cout << "Recording window countdown expired, closing on next transition..." << std::endl;
+                            }
+                        }
+                    }
 
-                }; // for i num_channels
+                    // Consume processed samples; discard exhausted front blocks
+                    for (unsigned int ch = 0; ch < num_channels; ++ch) {
+                        auto& front = rx_block_buf[ch].front();
+                        front.samples.erase(front.samples.begin(),
+                                            front.samples.begin() + static_cast<std::ptrdiff_t>(min_samps));
+                        if (front.samples.empty())
+                            rx_block_buf[ch].pop_front();
+                    }
+                }
 
-                // Avoid busy-waiting when no channel has data
+                // Sleep only when truly idle
                 if (!any_data) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    bool has_pending = false;
+                    for (unsigned int ch = 0; ch < num_channels; ++ch)
+                        if (!rx_block_buf[ch].empty()) { has_pending = true; break; }
+                    if (!has_pending)
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 }
 
             } // while
-        };
+        }; // Execute
 
     private:
 
         /**
          * @brief Callback data structure for userdata shared with the synchronizers in Callback-function
-         * 
+         *
          */
         struct CallbackData_t {
             FrameSamps_t frame_samps;                   // Samples belonging to detected frames
             FrameSyms_t frame_syms;                     // Symbols belonging to detected frames
-            MultiSync<synchronizer_iface>* ms_ptr;      // Pointer to MultiSync instance
+            MultiSync<synchronizer_iface, num_channels>* ms_ptr;      // Pointer to MultiSync instance
             unsigned int channel;                       // Channel index
             bool frame_detected;                        // Frame detected indicator
         };
@@ -262,73 +299,148 @@ class SyncWorker: public MultithreadWorker {
          * @brief Internal MultiSync instance
          *
          */
-        MultiSync<synchronizer_iface> ms_;
+        MultiSync<synchronizer_iface, num_channels> ms_;
 
         /**
-         * @brief Vector of frame sample blocks detected in the last Execute cycle
-         * 
+         * @brief record_index passed to ms_.Execute() on every call.
+         * 0  = searching mode (MultiSync accumulates rolling history).
+         * >0 = recording mode; the value is the window size (frame_len) passed on the first
+         *      non-zero call to trim all channel histories and open the snapshot window.
          */
-        std::vector<FrameSamps_t> frame_samps_;
+        unsigned int record_index_ = 0;
 
         /**
-         * @brief Vector of frame data-symbols blocks detected in the last Execute cycle
-         * 
+         * @brief Idle-sample countdown for the current recording window.
+         * Decremented once per complete lockstep step in Execute().
+         * Reset to symbol_len whenever a callback fires during recording (another symbol arrived).
+         * When it reaches 0 without a new callback, no more symbols are expected: record_index_
+         * is set back to 0 and snapshot_pending_ is raised to close the window.
          */
-        std::vector<FrameSyms_t> frame_syms_;
+        unsigned int record_countdown_ = 0;
+
+        /**
+         * @brief Raised when record_countdown_ hits 0; cleared after the snapshot is pushed.
+         * On the first ms_.Execute() call with record_index_ == 0 after this flag is raised,
+         * MultiSync closes the recording window and frame_buf_ holds the complete snapshot.
+         */
+        bool snapshot_pending_ = false;
+
+        /**
+         * @brief Timestamp of the rx-block in which the most recent frame was detected.
+         * Attached to every FrameSamps_t pushed to frame_samps_queue_.
+         */
+        uint64_t detection_timestamp_ = 0;
 
         /**
          * @brief Received samples queues for each channel
-         * 
+         *
          */
         std::array<SampleBlockQueue_t, num_channels> rx_queues_;
 
 
         /**
          * @brief Phase correction values queue to adjust NCO phases
-         * 
+         *
          */
         PhaseQueue_t phi_corr_queue_;
 
         /**
          * @brief External queue to push detected frame samples
-         * 
+         *
          */
         FrameSampsQueue_t* frame_samps_queue_;
 
         /**
          * @brief External queue to push detected frame data-symbols
-         * 
+         *
          */
         FrameSymsQueue_t* frame_syms_queue_;
 
         /**
-         * @brief Detect frames in the given rx-sample block for the specified channel. 
-         * The Frame samples and -symbols are stored in the internal cb_data_ structure.
-         * 
-         * @param rx_block Block of received samples with timestamp
-         * @param ch Channel index
-         * @return true Frame detected
-         * @return false No frame detected
+         * @brief Process a single sample for the specified channel.
+         *
+         * Forwards the sample to ms_.Execute() with the current record_index_, then handles the
+         * two events that can result from that call:
+         *
+         *   Any callback (frame detected on any channel):
+         *     - record_countdown_ is reset to symbol_len, keeping the recording window open.
+         *       When no callback fires for a full symbol-length of lockstep steps the window closes.
+         *     - The decoded data symbols are pushed to frame_syms_queue_ immediately for every
+         *       callback on every channel, collecting symbols across all channels and all symbols.
+         *
+         *   First callback only (not yet recording):
+         *     - record_index_ is set to symbol_len, opening a recording window in MultiSync on the
+         *       very next call. MultiSync trims all channel histories to the last symbol_len samples
+         *       (temporal alignment to frame start) and starts appending from there.
+         *     - detection_timestamp_ is captured from the triggering rx_block.
+         *
+         *   Recording window closed (snapshot_pending_ && MultiSync no longer recording):
+         *     - The complete time-aligned multi-channel snapshot is read from MultiSync
+         *       (ms_.GetMultiChannelFrameSamps()), one FrameSamps_t per channel is pushed to
+         *       frame_samps_queue_, and the snapshot buffer is cleared.
+         *
+         * @param 
          */
-        void DetectFrame(SampleBlock_t& rx_block, unsigned int ch){ 
-                // Clear callback-data buffer
-                cb_data_.frame_samps.samples.clear();  
-                cb_data_.frame_syms.symbols.clear();      
-                cb_data_.frame_detected = false;          
-                cb_data_.channel = ch; 
+        void DetectFrame(std::array<Sample_t, num_channels>& channel_samples, uint64_t timestamp) {
 
-                // Execute Synchronizer 
-                ms_.Execute(ch, &rx_block.samples);          
-                    
-                // Process callback-data 
-                if (cb_data_.frame_detected) {    
-                        cb_data_.frame_samps.timestamp = rx_block.timestamp; 
-                        cb_data_.frame_syms.timestamp = rx_block.timestamp;      
-                        cb_data_.frame_samps.channel = ch; 
-                        cb_data_.frame_syms.channel = ch;  
-                        frame_samps_.push_back(cb_data_.frame_samps);    
-                        frame_syms_.push_back(cb_data_.frame_syms);          
-                };
+            // Prepare callback data for this invocation
+            cb_data_.frame_detected = false;
+            cb_data_.frame_samps.samples.clear();
+            cb_data_.frame_syms.symbols.clear();
+            cb_data_.channel = 0;       // TODO: Separate cb-data for channels with fixed ch-numbers 
+
+            // Run the synchronizer; pass the current recording window size
+            ms_.Execute(channel_samples, record_index_);
+
+            // --- Event 1: first callback on any channel — opens the recording window ---
+            if (cb_data_.frame_detected) {
+                const unsigned int symbol_len =
+                    static_cast<unsigned int>(cb_data_.frame_samps.samples.size());
+
+                std::cout << "Frame detected on CH" << cb_data_.channel
+                          << " with " << symbol_len << " samples, Recording..." << std::endl;
+
+                // Trim accum_buf_ back to the frame start and begin recording.
+                // record_countdown_ is set to symbol_len: recording stays open as long as
+                // callbacks keep arriving (each resets the timer). When no callback fires for
+                // a full symbol-length of lockstep steps, the window closes automatically.
+                record_countdown_    = symbol_len;
+
+                if (!ms_.IsRecording()){
+                    record_index_        = symbol_len;
+                    detection_timestamp_ = timestamp;
+                }
+
+                // Push decoded data symbols immediately
+                if (frame_syms_queue_ && !cb_data_.frame_syms.symbols.empty()) {
+                    cb_data_.frame_syms.timestamp = timestamp;
+                    cb_data_.frame_syms.channel   = cb_data_.channel;
+                    PushItemToQueue(*frame_syms_queue_, FrameSyms_t(cb_data_.frame_syms));
+                }
+            }
+
+            // --- Event 2: recording window just closed (snapshot complete) ---
+            // snapshot_pending_ is raised by Execute() when record_countdown_ hits 0.
+            // The first ms_.Execute() call with record_index_ == 0 transitions MultiSync out of
+            // recording mode; we detect this here via !ms_.IsRecording().
+            if (snapshot_pending_ && !ms_.IsRecording()) {
+                std::cout << "Recording window closed, preparing snapshot..." << std::endl;
+                if (frame_samps_queue_) {
+                    const auto& snapshot = ms_.GetMultiChannelFrameSamps();
+                    for (unsigned int push_ch = 0; push_ch < num_channels; ++push_ch) {
+                        if (!snapshot[push_ch].empty()) {
+                            FrameSamps_t samps;
+                            samps.samples   = snapshot[push_ch];
+                            samps.channel   = push_ch;
+                            samps.timestamp = detection_timestamp_;
+                            PushItemToQueue(*frame_samps_queue_, std::move(samps));
+                        }
+                    }
+                }
+                ms_.ClearMultiChannelFrameSamps();
+                ms_.Reset();
+                snapshot_pending_ = false;
+            }
         };
 
         /**
@@ -348,10 +460,11 @@ class SyncWorker: public MultithreadWorker {
             // Add data symbols to callback-data buffer 
             cb.ms_ptr->GetFrameSyms(cb.channel, &cb.frame_syms.symbols);
 
-            // Reset synchronizer after returning the first data symbol (return 1)
-            return 1;
+            // Symbol-synchronizer: reset after returning the first data symbol
+            // Frame-synchronizer: reset after receiving the whole frame sequence
+            return 0;
         };
-
+        
 };
 
 #endif // SYNCWORKER_H
