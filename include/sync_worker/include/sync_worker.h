@@ -251,7 +251,6 @@ class SyncWorker: public MultithreadWorker {
                             if (record_countdown_ == 0) {
                                 record_index_     = 0;
                                 snapshot_pending_ = true;   // Snapshot completes on next Execute() transition
-                                std::cout << "Recording window countdown expired, closing on next transition..." << std::endl;
                             }
                         }
                     }
@@ -321,6 +320,13 @@ class SyncWorker: public MultithreadWorker {
          * is set back to 0 and snapshot_pending_ is raised to close the window.
          */
         unsigned int record_countdown_ = 0;
+
+        /**
+         * @brief Number of trailing noise samples to trim from the snapshot.
+         * Set to symbol_len each time record_countdown_ is (re-)set. When the countdown expires,
+         * exactly this many samples have accumulated since the last callback and must be removed.
+         */
+        unsigned int snapshot_trim_len_ = 0;
 
         /**
          * @brief Raised when record_countdown_ hits 0; cleared after the snapshot is pushed.
@@ -411,7 +417,8 @@ class SyncWorker: public MultithreadWorker {
                 // record_countdown_ is set to symbol_len: recording stays open as long as
                 // callbacks keep arriving (each resets the timer). When no callback fires for
                 // a full symbol-length of lockstep steps, the window closes automatically.
-                record_countdown_ = symbol_len;
+                record_countdown_   = symbol_len;
+                snapshot_trim_len_ = symbol_len;
 
                 if (!ms_.IsRecording()) {
                     record_index_        = symbol_len;
@@ -431,13 +438,14 @@ class SyncWorker: public MultithreadWorker {
             // The first ms_.Execute() call with record_index_ == 0 transitions MultiSync out of
             // recording mode; we detect this here via !ms_.IsRecording().
             if (snapshot_pending_ && !ms_.IsRecording()) {
-                std::cout << "Recording window closed, preparing snapshot..." << std::endl;
                 if (frame_samps_queue_) {
                     const auto& snapshot = ms_.GetMultiChannelFrameSamps();
                     for (unsigned int push_ch = 0; push_ch < num_channels; ++push_ch) {
-                        if (!snapshot[push_ch].empty()) {
+                        const auto& raw = snapshot[push_ch];
+                        std::size_t trim = std::min(static_cast<std::size_t>(snapshot_trim_len_), raw.size());
+                        if (trim < raw.size()) {
                             FrameSamps_t samps;
-                            samps.samples   = snapshot[push_ch];
+                            samps.samples.assign(raw.begin(), raw.end() - static_cast<std::ptrdiff_t>(trim));
                             samps.channel   = push_ch;
                             samps.timestamp = detection_timestamp_;
                             PushItemToQueue(*frame_samps_queue_, std::move(samps));
