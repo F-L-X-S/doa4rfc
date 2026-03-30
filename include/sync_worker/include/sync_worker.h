@@ -90,10 +90,13 @@ class SyncWorker: public MultithreadWorker {
         SyncWorker(const MsCreateParams_t&   synchronizer_params,
                     std::atomic<bool>&          stop_signal_ref):
                         MultithreadWorker(stop_signal_ref),
-                        ms_(synchronizer_params, callback, &cb_data_) {
+                        ms_(synchronizer_params, callback, MakeUserdataPtrs(cb_data_)) {
                             frame_samps_queue_ = nullptr;
                             frame_syms_queue_ = nullptr;
-                            cb_data_.ms_ptr = &ms_;
+                            for (unsigned int ch = 0; ch < num_channels; ++ch) {
+                                cb_data_[ch].channel = ch;
+                                cb_data_[ch].ms_ptr  = &ms_;
+                            }
                             AddWorkerQueue<PhaseQueue_t>(&phi_corr_queue_);         // Add Phase-Corr Queue to Worker
 
                             for (unsigned int i = 0; i < num_channels; ++i){
@@ -290,10 +293,11 @@ class SyncWorker: public MultithreadWorker {
         };
 
         /**
-         * @brief Callback-data buffer shared by each channel-synchronizers callback-function
+         * @brief Per-channel callback-data buffers. Each channel synchronizer receives a pointer
+         * to its own entry so that concurrent callbacks carry the correct channel index.
          *
          */
-        CallbackData_t cb_data_;
+        std::array<CallbackData_t, num_channels> cb_data_;
 
         /**
          * @brief Internal MultiSync instance
@@ -383,39 +387,42 @@ class SyncWorker: public MultithreadWorker {
          */
         void DetectFrame(std::array<Sample_t, num_channels>& channel_samples, uint64_t timestamp) {
 
-            // Prepare callback data for this invocation
-            cb_data_.frame_detected = false;
-            cb_data_.frame_samps.samples.clear();
-            cb_data_.frame_syms.symbols.clear();
-            cb_data_.channel = 0;       // TODO: Separate cb-data for channels with fixed ch-numbers 
+            // Reset per-channel callback data for this invocation
+            for (unsigned int ch = 0; ch < num_channels; ++ch) {
+                cb_data_[ch].frame_detected = false;
+                cb_data_[ch].frame_samps.samples.clear();
+                cb_data_[ch].frame_syms.symbols.clear();
+            }
 
             // Run the synchronizer; pass the current recording window size
             ms_.Execute(channel_samples, record_index_);
 
-            // --- Event 1: first callback on any channel — opens the recording window ---
-            if (cb_data_.frame_detected) {
-                const unsigned int symbol_len =
-                    static_cast<unsigned int>(cb_data_.frame_samps.samples.size());
+            // --- Event 1: callback on any channel — opens/extends the recording window ---
+            for (unsigned int ch = 0; ch < num_channels; ++ch) {
+                if (!cb_data_[ch].frame_detected) continue;
 
-                std::cout << "Frame detected on CH" << cb_data_.channel
+                const unsigned int symbol_len =
+                    static_cast<unsigned int>(cb_data_[ch].frame_samps.samples.size());
+
+                std::cout << "Frame detected on CH" << ch
                           << " with " << symbol_len << " samples, Recording..." << std::endl;
 
                 // Trim accum_buf_ back to the frame start and begin recording.
                 // record_countdown_ is set to symbol_len: recording stays open as long as
                 // callbacks keep arriving (each resets the timer). When no callback fires for
                 // a full symbol-length of lockstep steps, the window closes automatically.
-                record_countdown_    = symbol_len;
+                record_countdown_ = symbol_len;
 
-                if (!ms_.IsRecording()){
+                if (!ms_.IsRecording()) {
                     record_index_        = symbol_len;
                     detection_timestamp_ = timestamp;
                 }
 
                 // Push decoded data symbols immediately
-                if (frame_syms_queue_ && !cb_data_.frame_syms.symbols.empty()) {
-                    cb_data_.frame_syms.timestamp = timestamp;
-                    cb_data_.frame_syms.channel   = cb_data_.channel;
-                    PushItemToQueue(*frame_syms_queue_, FrameSyms_t(cb_data_.frame_syms));
+                if (frame_syms_queue_ && !cb_data_[ch].frame_syms.symbols.empty()) {
+                    cb_data_[ch].frame_syms.timestamp = timestamp;
+                    cb_data_[ch].frame_syms.channel   = ch;
+                    PushItemToQueue(*frame_syms_queue_, FrameSyms_t(cb_data_[ch].frame_syms));
                 }
             }
 
@@ -444,11 +451,24 @@ class SyncWorker: public MultithreadWorker {
         };
 
         /**
+         * @brief Builds a per-channel array of void* pointers into cb_data for MultiSync construction.
+         * Called before ms_ is initialized; safe because cb_data_ is declared before ms_.
+         */
+        static std::array<void*, num_channels> MakeUserdataPtrs(std::array<CallbackData_t, num_channels>& cb_data) {
+            std::array<void*, num_channels> ptrs;
+            for (std::size_t i = 0; i < num_channels; ++i)
+                ptrs[i] = &cb_data[i];
+            return ptrs;
+        }
+
+        /**
          * @brief Generic synchronizer callback handler.
          * Called by SyncTraits::Callback via CallbackWrapper after a frame is detected.
+         * Each channel's synchronizer passes its own cb_data_[ch] entry, so cb.channel
+         * is already set to the correct channel index.
          *
-         * @param _cb_data pointer to CallbackData_t
-         * @return 1 to reset synchronizer after first data symbol
+         * @param _cb_data pointer to the channel's CallbackData_t entry
+         * @return 0 — synchronizer continues after the callback
          */
         static int callback(void* _cb_data){
             CallbackData_t& cb = *static_cast<CallbackData_t*>(_cb_data);
@@ -460,9 +480,8 @@ class SyncWorker: public MultithreadWorker {
             // Add data symbols to callback-data buffer 
             cb.ms_ptr->GetFrameSyms(cb.channel, &cb.frame_syms.symbols);
 
-            // Symbol-synchronizer: reset after returning the first data symbol
-            // Frame-synchronizer: reset after receiving the whole frame sequence
-            return 0;
+            // Reset after callback (return 1) / don't reset after callback (return 0):
+            return 1;
         };
         
 };

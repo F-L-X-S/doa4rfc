@@ -69,18 +69,18 @@ public:
      * @param userdata user-defined data passed to handler
      */
     MultiSync(
-            const CreateParams_t&    synchronizer_params,
-            GenericCallback_t        handler,
-            void *                   userdata):
-            cb_wrapper_{handler, userdata}
+            const CreateParams_t&           synchronizer_params,
+            GenericCallback_t               handler,
+            std::array<void*, num_channels> userdata_per_channel)
             {
                 // create synchronizer instances for all channels
                 framesync_ = new synchronizer_interface::SynchronizerType[num_channels];
                 // create NCO instances for all channels
                 nco_ = new nco_crcf[num_channels];
-                // initialize NCO and synchronizer instances
+                // initialize NCO and synchronizer instances with per-channel callback wrappers
                 for (unsigned int i=0; i<num_channels; i++) {
-                    framesync_[i] = synchronizer_interface::Create(synchronizer_params, &cb_wrapper_);
+                    cb_wrappers_[i] = {handler, userdata_per_channel[i]};
+                    framesync_[i] = synchronizer_interface::Create(synchronizer_params, &cb_wrappers_[i]);
                     nco_[i] = nco_crcf_create(LIQUID_VCO);
                 }
                 // initialize per-channel recording buffers
@@ -311,10 +311,10 @@ private:
     CreateParams_t params_;
 
     /**
-     * @brief Callback wrapper storing the generic handler and real userdata.
-     * Passed to each synchronizer instance as userdata.
+     * @brief Per-channel callback wrappers, each holding the generic handler and the
+     * channel-specific userdata pointer. Passed to the corresponding synchronizer instance.
      */
-    CallbackWrapper cb_wrapper_;
+    std::array<CallbackWrapper, num_channels> cb_wrappers_;
 
     /**
      * @brief Per-channel rolling accumulation buffer (searching mode).
