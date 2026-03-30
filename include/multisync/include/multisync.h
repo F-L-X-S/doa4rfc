@@ -31,6 +31,8 @@
 #include <cmath>
 #include <cassert>
 #include <concepts>
+#include <iostream>
+#include <limits>
 #include <vector>
 #include <liquid.h>
 #include <synctraits.h>
@@ -46,7 +48,7 @@
  * 
  * @tparam synchronizer_type Liquid-DSP frame synchronizer type 
  */
-template<SyncTraitsConcept synchronizer_interface>          
+template<SyncTraitsConcept synchronizer_interface, unsigned int num_channels>          
 class MultiSync {
 public:
 
@@ -61,29 +63,28 @@ public:
      * @brief Construct a new MultiSync object with the specified number of channels and given synchronizer parameters.
      * Synchronizers will call the user-defined callback function with the user-defined data structure when receiving a frame.
      *
-     * @param num_channels number of channels
      * @param synchronizer_params synchronizer parameters
      * @param handler generic callback handler invoked on frame detection
      * @param userdata user-defined data passed to handler
      */
-    MultiSync(unsigned int           num_channels,
+    MultiSync(
             const CreateParams_t&    synchronizer_params,
             GenericCallback_t        handler,
             void *                   userdata):
-            num_channels_(num_channels), cb_wrapper_{handler, userdata}
+            cb_wrapper_{handler, userdata}
             {
                 // create synchronizer instances for all channels
-                framesync_ = new synchronizer_interface::SynchronizerType[num_channels_];
+                framesync_ = new synchronizer_interface::SynchronizerType[num_channels];
                 // create NCO instances for all channels
-                nco_ = new nco_crcf[num_channels_];
+                nco_ = new nco_crcf[num_channels];
                 // initialize NCO and synchronizer instances
                 for (unsigned int i=0; i<num_channels; i++) {
                     framesync_[i] = synchronizer_interface::Create(synchronizer_params, &cb_wrapper_);
                     nco_[i] = nco_crcf_create(LIQUID_VCO);
                 }
                 // initialize per-channel recording buffers
-                accum_buf_.resize(num_channels_);
-                frame_buf_.resize(num_channels_);
+                accum_buf_.resize(num_channels);
+                frame_buf_.resize(num_channels);
             }
 
     /**
@@ -93,7 +94,7 @@ public:
     ~MultiSync()
             {
                 // Call Liquid-DSP destroy functions
-                for (unsigned int i = 0; i < num_channels_; i++){
+                for (unsigned int i = 0; i < num_channels; i++){
                     synchronizer_interface::Destroy(framesync_[i]);
                     nco_crcf_destroy(nco_[i]);
                 }
@@ -108,78 +109,81 @@ public:
      */
     void Reset()
             {
-                for (unsigned int i = 0; i < num_channels_; ++i) 
+                for (unsigned int i = 0; i < num_channels; ++i) 
                     synchronizer_interface::Reset(framesync_[i]);
             };
 
     /**
-     * @brief Push samples into the specified channel's synchronizer and manage the multi-channel
-     * recording window.
+     * @brief Process all channels simultaneously with a single sample.
      *
-     * In normal operation (record_index == 0) every NCO-corrected sample is appended to an internal
-     * per-channel accumulation buffer so that a temporally aligned snapshot can be assembled later.
+     * channel_samples[ch] holds the NCO-corrected input samples for channel ch.
      *
-     * Recording lifecycle (driven by SyncWorker):
+     * Channels are processed sequentially (ch 0 … ch N-1) on the same sample so
+     * that each channel's synchronizer callback fires and the Execute() function returns
+     * to enable processing the callback-data.
      *
-     *   record_index == 0  →  searching mode: samples accumulate in accum_buf_[channel_id].
+     * Recording lifecycle:
+     *
+     *   record_index == 0  →  searching mode: every NCO-corrected sample is
+     *       appended to the per-channel accumulation buffer accum_buf_.
      *
      *   record_index > 0, first time seen  →  snapshot trigger:
-     *       All channels' accum_buf_ are trimmed to their last record_index samples and copied into
-     *       frame_buf_ (the output snapshot). accum_buf_ entries are then cleared and recording_
-     *       is set to true. From this call onward, every new sample is appended directly to frame_buf_.
+     *       All channels' accum_buf_ are trimmed to their last record_index samples
+     *       and copied into frame_buf_. accum_buf_ entries are cleared and recording_
+     *       is set to true. Subsequent blocks are appended directly to frame_buf_.
      *
      *   record_index > 0, recording_ already true  →  continue appending to frame_buf_.
      *
-     *   record_index == 0 while recording_ == true  →  stop recording. frame_buf_ contains the
-     *       complete time-aligned multi-channel snapshot, ready to be read via
-     *       GetMultiChannelFrameSamps(). accum_buf_ is left empty and refills from the next call.
+     *   record_index == 0 while recording_ == true  →  stop recording. frame_buf_
+     *       contains the complete time-aligned multi-channel snapshot, ready to be
+     *       read via GetMultiChannelFrameSamps(). accum_buf_ is left empty and
+     *       refills naturally from the next call.
      *
-     * @param channel_id   Channel-ID
-     * @param x            Pointer to the input sample vector (modified in-place by NCO correction)
-     * @param record_index 0 = searching mode; >0 = trigger/continue recording with this window size
+     * @param channel_samples  One sample per channel
+     * @param record_index     0 = searching; >0 = recording window size.
      */
-    void Execute(unsigned int            channel_id,
-                 std::vector<Sample_t>*  x,
-                 unsigned int            record_index = 0)
+    void Execute(std::array<Sample_t, num_channels>& channel_samples,
+                        unsigned int record_index = 0)
                 {
-                    // Apply constant phase offset
-                    nco_crcf_mix_block_up(nco_[channel_id],
-                        reinterpret_cast<liquid_float_complex*>(x->data()),
-                        reinterpret_cast<liquid_float_complex*>(x->data()),
-                        x->size());
+                    // Process each channel's sample
+                    for (unsigned int ch = 0; ch < num_channels; ++ch) {
+                        Sample_t* s = channel_samples[ch];
 
-                    // Process the full block through the synchronizer at once
-                    synchronizer_interface::Execute(framesync_[channel_id], x->data(), x->size());
+                        // Apply phase offset to the sample
+                        nco_crcf_mix_up(nco_[ch],
+                            reinterpret_cast<liquid_float_complex*>(s),
+                            reinterpret_cast<liquid_float_complex*>(s));
 
-                    // Append the whole block to the appropriate buffer
-                    if (recording_) {
-                        frame_buf_[channel_id].insert(frame_buf_[channel_id].end(), x->begin(), x->end());
-                    } else {
-                        accum_buf_[channel_id].insert(accum_buf_[channel_id].end(), x->begin(), x->end());
+                        // Run the synchronizer on the block (may trigger callback)
+                        synchronizer_interface::Execute(framesync_[ch], s, 1);
+
+                        // Append the sample to the appropriate recording buffer
+                        if (recording_) {
+                            frame_buf_[ch].push(s);
+                        } else {
+                            accum_buf_[ch].push(s);
+                        }
                     }
 
-                    // --- State transitions (evaluated after all samples in x are processed) ---
+                    // --- State transitions (once per block, after all channels) ---
 
                     if (record_index > 0 && !recording_) {
                         // Snapshot trigger: trim every channel's history to the last record_index
                         // samples and use these as the initial contents of the snapshot buffer.
-                        // Because SyncWorker feeds all channels in lockstep, each accum_buf_ holds
-                        // the same number of samples, so the trim produces a time-aligned window.
-                        for (unsigned int ch = 0; ch < num_channels_; ++ch) {
+                        for (unsigned int ch = 0; ch < num_channels; ++ch) {
                             auto& src = accum_buf_[ch];
                             std::size_t keep = src.size() > record_index
                                                ? src.size() - record_index : 0;
                             frame_buf_[ch].assign(src.begin() + keep, src.end());
-                            src.clear();    // accum_buf_ no longer needed while recording
+                            src.clear();
                         }
                         recording_ = true;
 
                     } else if (record_index == 0 && recording_) {
                         // Stop recording; frame_buf_ now holds the complete snapshot.
                         recording_ = false;
-                        std::cout << "Recording stopped, snapshot ready with " << frame_buf_[channel_id].size() << " samples." << std::endl;
-                        // accum_buf_ is already empty (cleared at recording start); it will
-                        // refill naturally as Execute() is called with record_index == 0.
+                        std::cout << "Recording stopped, snapshot ready with "
+                                  << frame_buf_[0].size() << " samples." << std::endl;
                     }
                 };
 
@@ -289,12 +293,6 @@ public:
 
 private:
     /**
-     * @brief number of receiving channels 
-     * 
-     */
-    unsigned int num_channels_;      
-
-    /**
      * @brief Pointer to first synchronizer instance in the array of synchronizer instances for all channels
      * 
      */
@@ -324,7 +322,7 @@ private:
      * Holds NCO-corrected samples since the last recording cycle ended.
      * Trimmed and moved into frame_buf_ when a recording window is opened.
      */
-    std::vector<std::vector<Sample_t>> accum_buf_;
+    Samples_2dim_t accum_buf_;
 
     /**
      * @brief Per-channel snapshot buffer (recording mode).
@@ -332,7 +330,7 @@ private:
      * Initialized with trimmed history on recording start, then extended sample-by-sample until
      * recording stops. Read via GetMultiChannelFrameSamps().
      */
-    std::vector<std::vector<Sample_t>> frame_buf_;
+    Samples_2dim_t frame_buf_;
 
     /**
      * @brief True while a recording window is active.
