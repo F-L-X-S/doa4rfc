@@ -68,3 +68,7 @@ Synchronizer types are selected via template traits (`SyncTraits` specialization
 ## Tests
 
 Tests exist in `tests/` (Google Test) but are currently **commented out** in `CMakeLists.txt`.
+
+## Code Style
+
+- Never add, remove, or modify whitespace in lines that are not part of the actual code change. Keep diffs minimal and focused.
