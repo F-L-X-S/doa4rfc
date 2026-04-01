@@ -29,7 +29,7 @@
 using namespace doa4rfc;
 
 // Definition of the transmission-settings 
-#define FRAME_PADDING 30            // Noisy samples around the frame (before and after) 
+#define FRAME_PADDING 20000         // Noisy samples around the frame (before and after) 
 #define NUM_CHANNELS 4              // Number of simulated multipath channels 
 #define SAMPLE_RATE 3.84e6f         // Sample rate [Hz] 
 #define CARRIER_FREQUENCY 6.0e5f    // Carrier Frequency [Hz]
@@ -89,9 +89,9 @@ int main(int argc, char*argv[])
             constexpr unsigned int taper_len   = 4;     // window taper length 
             static unsigned char p[M];                  // subcarrier allocation array
             ofdmframe_init_default_sctype(M, p);        // initialize subcarrier allocation
-            SyncWorker<NUM_CHANNELS, ofdmframesync_iface> sync({M, cp_len, taper_len, p}, std::ref(stop_signal_called));
+            SyncWorker<NUM_CHANNELS, ofdmflexframesync_iface> sync({M, cp_len, taper_len, p}, std::ref(stop_signal_called), 0);
     #elif defined(FLEXFRAME)
-            SyncWorker<NUM_CHANNELS, flexframesync_iface> sync({}, std::ref(stop_signal_called));
+            SyncWorker<NUM_CHANNELS, flexframesync_iface> sync({}, std::ref(stop_signal_called), 0);
     #else 
         #error "Synchronizer-Type not supported: Define OFDMFRAME or FLEXFRAME"
     #endif
@@ -205,6 +205,13 @@ int main(int argc, char*argv[])
         flexframegen_destroy(fg);
     #endif
 
+    // Add frame-sequence to matlab-export
+    m_xport.Add(tx, "TX_FRAME");
+    m_xport.Add("figure;subplot(2,1,1); hold on;plot(real(TX_FRAME), 'DisplayName', 'Re(TX_FRAME)');plot(imag(TX_FRAME), 'DisplayName', 'Im(TX_FRAME)');");
+    m_xport.Add("subplot(2,1,2); hold on;plot(abs(TX_FRAME), 'DisplayName', 'TX_FRAME')");
+    m_xport.Add("subplot(2,1,1); title('Samples'); xlabel('Sample Index'); ylabel('Amplitude'); legend; grid on;");
+    m_xport.Add("subplot(2,1,2); title('Samples Magnitude'); xlabel('Sample Index'); ylabel('Magnitude'); legend; grid on;");
+
     // ------------------- Upconversion ---------------------
     nco_crcf nco_tx = nco_crcf_create(LIQUID_NCO);
     nco_crcf_set_frequency(nco_tx, 2*M_PI*CARRIER_FREQUENCY/SAMPLE_RATE);
@@ -222,7 +229,7 @@ int main(int argc, char*argv[])
 
     // Initialize buffer to hold the received baseband signals
     unsigned int sequnece_len = frame_len + FRAME_PADDING;
-    Samples_2dim_t rx(NUM_CHANNELS, Samples_1dim_t(sequnece_len));           
+Samples_2dim_t rx(NUM_CHANNELS, Samples_1dim_t(sequnece_len));           
 
     // Apply channel to the generated signal
     for (unsigned int ch = 0; ch < NUM_CHANNELS; ++ch) {
@@ -291,11 +298,11 @@ int main(int argc, char*argv[])
     
     // Wait until program is exited by user... 
     while (!stop_signal_called.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-
         // Add generated Frame to queue for transmission to doa4rfc 
         auto rx_copy = rx;
         zmq_tx_external_worker.PushItemToQueue(tx_queue_external, std::move(rx_copy));
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
     };
 
     terminal.StopWorker();
