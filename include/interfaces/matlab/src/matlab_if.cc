@@ -75,8 +75,14 @@ void MatlabWorker::Execute() {
             continue;   // No samples available
         }
 
+        // Discard data if export is disabled and no single-shot is pending
+        if (!export_enabled_.load() && samps_single_shot_.load() == 0 && syms_single_shot_.load() == 0)
+            continue;
+
         // Export buffers to MATLAB file (only if enabled or single-shot active)
-        if (export_enabled_.load() || samps_single_shot_.load() > 0) {
+        // Single-shot flag is only consumed when the respective queue had data this iteration,
+        // preventing the flag from being cleared while the buffer is still empty.
+        if (export_enabled_.load() || (samps_single_shot_.load() > 0 && samps_count > 0)) {
             if (!export_enabled_.load() && samps_single_shot_.load() > 0) {
                 // Single-shot: keep only the first frame
                 if (multich_samps_buffer.size() > 1)
@@ -86,7 +92,7 @@ void MatlabWorker::Execute() {
             ExportSampsBuffer(multich_samps_buffer);
         }
 
-        if (export_enabled_.load() || syms_single_shot_.load() > 0) {
+        if (export_enabled_.load() || (syms_single_shot_.load() > 0 && syms_count > 0)) {
             if (!export_enabled_.load() && syms_single_shot_.load() > 0) {
                 // Single-shot: keep only the first frame
                 if (multich_syms_buffer.size() > 1)
