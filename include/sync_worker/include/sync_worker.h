@@ -88,9 +88,11 @@ class SyncWorker: public MultithreadWorker {
         using MsCreateParams_t = MultiSync<synchronizer_iface, num_channels>::CreateParams_t;
 
         SyncWorker(const MsCreateParams_t&   synchronizer_params,
-                    std::atomic<bool>&          stop_signal_ref):
+                    std::atomic<bool>&          stop_signal_ref,
+                    int                         record_padding = 0):
                         MultithreadWorker(stop_signal_ref),
-                        ms_(synchronizer_params, callback, MakeUserdataPtrs(cb_data_)) {
+                        ms_(synchronizer_params, callback, MakeUserdataPtrs(cb_data_)),
+                        record_padding_(record_padding) {
                             frame_samps_queue_ = nullptr;
                             frame_syms_queue_ = nullptr;
                             for (unsigned int ch = 0; ch < num_channels; ++ch) {
@@ -284,9 +286,9 @@ class SyncWorker: public MultithreadWorker {
          *
          */
         struct CallbackData_t {
-            FrameSamps_t frame_samps;                   // Samples belonging to detected frames
             FrameSyms_t frame_syms;                     // Symbols belonging to detected frames
             MultiSync<synchronizer_iface, num_channels>* ms_ptr;      // Pointer to MultiSync instance
+            unsigned int frame_len;                     // length of frame in samples 
             unsigned int channel;                       // Channel index
             bool frame_detected;                        // Frame detected indicator
         };
@@ -305,6 +307,12 @@ class SyncWorker: public MultithreadWorker {
         MultiSync<synchronizer_iface, num_channels> ms_;
 
         /**
+         * @brief Number of additional samples to append beyond the frame length when opening
+         * or extending the recording window. Set via constructor parameter.
+         */
+        int record_padding_ = 0;
+
+        /**
          * @brief record_index passed to ms_.Execute() on every call.
          * 0  = searching mode (MultiSync accumulates rolling history).
          * >0 = recording mode; the value is the window size (frame_len) passed on the first
@@ -315,7 +323,7 @@ class SyncWorker: public MultithreadWorker {
         /**
          * @brief Idle-sample countdown for the current recording window.
          * Decremented once per complete lockstep step in Execute().
-         * Reset to symbol_len whenever a callback fires during recording (another symbol arrived).
+         * Reset to frame_len whenever a callback fires during recording (another symbol arrived).
          * When it reaches 0 without a new callback, no more symbols are expected: record_index_
          * is set back to 0 and snapshot_pending_ is raised to close the window.
          */
@@ -323,7 +331,7 @@ class SyncWorker: public MultithreadWorker {
 
         /**
          * @brief Number of trailing noise samples to trim from the snapshot.
-         * Set to symbol_len each time record_countdown_ is (re-)set. When the countdown expires,
+         * Set to frame_len each time record_countdown_ is (re-)set. When the countdown expires,
          * exactly this many samples have accumulated since the last callback and must be removed.
          */
         unsigned int snapshot_trim_len_ = 0;
@@ -373,14 +381,14 @@ class SyncWorker: public MultithreadWorker {
          * two events that can result from that call:
          *
          *   Any callback (frame detected on any channel):
-         *     - record_countdown_ is reset to symbol_len, keeping the recording window open.
+         *     - record_countdown_ is reset to frame_len, keeping the recording window open.
          *       When no callback fires for a full symbol-length of lockstep steps the window closes.
          *     - The decoded data symbols are pushed to frame_syms_queue_ immediately for every
          *       callback on every channel, collecting symbols across all channels and all symbols.
          *
          *   First callback only (not yet recording):
-         *     - record_index_ is set to symbol_len, opening a recording window in MultiSync on the
-         *       very next call. MultiSync trims all channel histories to the last symbol_len samples
+         *     - record_index_ is set to frame_len, opening a recording window in MultiSync on the
+         *       very next call. MultiSync trims all channel histories to the last frame_len samples
          *       (temporal alignment to frame start) and starts appending from there.
          *     - detection_timestamp_ is captured from the triggering rx_block.
          *
@@ -396,7 +404,7 @@ class SyncWorker: public MultithreadWorker {
             // Reset per-channel callback data for this invocation
             for (unsigned int ch = 0; ch < num_channels; ++ch) {
                 cb_data_[ch].frame_detected = false;
-                cb_data_[ch].frame_samps.samples.clear();
+                cb_data_[ch].frame_len = 0;
                 cb_data_[ch].frame_syms.symbols.clear();
             }
 
@@ -407,21 +415,17 @@ class SyncWorker: public MultithreadWorker {
             for (unsigned int ch = 0; ch < num_channels; ++ch) {
                 if (!cb_data_[ch].frame_detected) continue;
 
-                const unsigned int symbol_len =
-                    static_cast<unsigned int>(cb_data_[ch].frame_samps.samples.size());
-
-                std::cout << "Frame detected on CH" << ch
-                          << " with " << symbol_len << " samples, Recording..." << std::endl;
+                const unsigned int frame_len = cb_data_[ch].frame_len;
 
                 // Trim accum_buf_ back to the frame start and begin recording.
-                // record_countdown_ is set to symbol_len: recording stays open as long as
+                // record_countdown_ is set to frame_len: recording stays open as long as
                 // callbacks keep arriving (each resets the timer). When no callback fires for
                 // a full symbol-length of lockstep steps, the window closes automatically.
-                record_countdown_   = symbol_len;
-                snapshot_trim_len_ = symbol_len;
+                record_countdown_   = frame_len+record_padding_;
+                snapshot_trim_len_ = frame_len;
 
                 if (!ms_.IsRecording()) {
-                    record_index_        = symbol_len;
+                    record_index_        = frame_len+record_padding_;
                     detection_timestamp_ = timestamp;
                 }
 
@@ -483,7 +487,7 @@ class SyncWorker: public MultithreadWorker {
             cb.frame_detected = true;
 
             // Add samples to callback-data buffer
-            cb.ms_ptr->GetFrameSamps(cb.channel, &cb.frame_samps.samples);   
+            cb.frame_len = cb.ms_ptr->GetFrameLen(cb.channel);   
 
             // Add data symbols to callback-data buffer 
             cb.ms_ptr->GetFrameSyms(cb.channel, &cb.frame_syms.symbols);
