@@ -6,7 +6,7 @@
  * 
  * The MultiSync class utilizes the abstract SyncTraits struct that defines the Liquid-DSP interface for 
  * the specified synchronizer type. SyncTraits defines the C-function call of the Liquid-DSP synchronizer 
- * corresponding to the C++ functions used in MultiSync (Create, Reset, Execute, Destroy, GetFrameSamps).
+ * corresponding to the C++ functions used in MultiSync (Create, Reset, Execute, Destroy, GetFrameLen, GetFrameSyms).
  * 
  * Enabling MultiSync for different synchronizer types is achieved by specializing the SyncTraits-template for the required synchronizer type. 
  * 
@@ -59,16 +59,16 @@ concept SyncTraitsConcept = requires(
     typename SyncTraitsSpecification::CreateParams_t createParams,              // Parameters for synchronizer create function
 
     unsigned int n,                         // Number of input samples to read for Execute function
-    Sample_t* x,                            // Pointer to store samples on for GetFrameSamp and Execute function
-    Symbol_t* y,                            // Pointer to store samples on for GetFrameSym function
-    unsigned int pos                        // Position Index to read from in GetFrameSamp / GetFrameSym function
+    Sample_t* x,                            // Pointer to Sample
+    Symbol_t* y,                            // Pointer to Symbol
+    unsigned int pos                        // Position Index to read fromGetFrameSym function
 ) {
     // Check function signatures
     { SyncTraitsSpecification::Create(createParams, (CallbackWrapper*)nullptr) } -> std::same_as<typename SyncTraitsSpecification::SynchronizerType>;
     { SyncTraitsSpecification::Reset(synchronizer) } -> std::same_as<void>;
     { SyncTraitsSpecification::Execute(synchronizer, x, n) } -> std::same_as<int>;
     { SyncTraitsSpecification::Destroy(synchronizer) } -> std::same_as<void>;
-    { SyncTraitsSpecification::GetFrameSamp(synchronizer, x, pos) } -> std::same_as<unsigned int>;
+    { SyncTraitsSpecification::GetFrameLen(synchronizer) } -> std::same_as<unsigned int>;
     { SyncTraitsSpecification::GetFrameSym(synchronizer, y, pos) } -> std::same_as<unsigned int>;
 };
 
@@ -89,7 +89,7 @@ struct SyncTraits {
 // -------------------- OFDM Frame Synchronizer --------------------
 /**
  * @brief SyncTraits specialization for the OFDM frame synchronizer.
- * Defines the functions (Create, Reset, Execute, Destroy, GetFrameSamps) for the OFDM frame synchronizer.
+ * Defines the functions (Create, Reset, Execute, Destroy, GetFrameLen, GetFrameSyms) for the OFDM frame synchronizer.
  * 
  * ofdmframesync documentation: https://liquidsdr.org/doc/ofdmflexframe/
  * 
@@ -180,10 +180,9 @@ struct SyncTraits<ofdmframesync> {
      * @param _x buffer to store the sample on 
      * @param _pos Index of buffer position to read
      */
-    static unsigned int GetFrameSamp(SynchronizerType fs, Sample_t* _x, unsigned int _pos) 
+    static unsigned int GetFrameLen(SynchronizerType fs) 
     {
-        liquid_float_complex* _x_liquid = liquid_conv::Ptr(_x);
-        return ofdmframesync_get_frame_samp(fs, _x_liquid, _pos);
+        return ofdmframesync_get_frame_len(fs);
     };
 
     /**
@@ -213,7 +212,7 @@ using ofdmframesync_iface = SyncTraits<ofdmframesync>;
 
 /**
  * @brief SyncTraits specialization for the flexible ofdm frame synchronizer ofdmflexframesync.
- * Defines the functions (Create, Reset, Execute, Destroy, GetFrameSamps) for the flexible frame synchronizer.
+ * Defines the functions (Create, Reset, Execute, Destroy, GetFrameLen, GetFrameSyms) for the flexible frame synchronizer.
  * 
  * flexframesync documentation: https://liquidsdr.org/doc/tutorial-ofdmflexframe/
  * 
@@ -310,10 +309,9 @@ struct SyncTraits<ofdmflexframesync> {
      * @param _x buffer to store the sample on 
      * @param _pos Index of buffer position to read
      */
-    static unsigned int GetFrameSamp(SynchronizerType fs, Sample_t* _x, unsigned int _pos) 
+    static unsigned int GetFrameLen(SynchronizerType fs) 
     {
-        liquid_float_complex* _x_liquid = liquid_conv::Ptr(_x);
-        return ofdmflexframesync_get_frame_samp(fs, _x_liquid, _pos);
+        return ofdmflexframesync_get_frame_len(fs);
     };
 
     /**
@@ -343,7 +341,7 @@ using ofdmflexframesync_iface = SyncTraits<ofdmflexframesync>;
 
 /**
  * @brief SyncTraits specialization for the flexible single-carrier frame synchronizer flexframesync.
- * Defines the functions (Create, Reset, Execute, Destroy, GetFrameSamps) for the flexible frame synchronizer.
+ * Defines the functions (Create, Reset, Execute, Destroy, GetFrameLen, GetFrameSyms) for the flexible frame synchronizer.
  * 
  * flexframesync documentation: https://liquidsdr.org/doc/flexframe/
  * 
@@ -429,18 +427,15 @@ struct SyncTraits<flexframesync> {
     };
 
     /**
-     * @brief Wrapper function to get sample of the last frame received by the frame synchronizer.
+     * @brief Wrapper function to get length in samples of the last frame received by the frame synchronizer.
      * 
      * The function is called within the user defined callback function 
      * 
      * @param fs Pointer to the synchronizer
-     * @param _x buffer to store the sample on 
-     * @param _pos Index of buffer position to read
      */
-    static unsigned int GetFrameSamp(SynchronizerType fs, Sample_t* _x, unsigned int _pos) 
+    static unsigned int GetFrameLen(SynchronizerType fs) 
     {
-        liquid_float_complex* _x_liquid = liquid_conv::Ptr(_x);
-        return flexframesync_get_frame_samp(fs, _x_liquid, _pos);
+        return flexframesync_get_frame_len(fs);
     };
 
     /**

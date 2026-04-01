@@ -181,8 +181,6 @@ public:
                     } else if (record_index == 0 && recording_) {
                         // Stop recording; frame_buf_ now holds the complete snapshot.
                         recording_ = false;
-                        std::cout << "Recording stopped, snapshot ready with "
-                                  << frame_buf_[0].size() << " samples." << std::endl;
                     }
                 };
 
@@ -222,23 +220,15 @@ public:
                 };
 
     /**
-     * @brief Get the samples of the last frame of the specified channel
+     * @brief Get the length of the last frame of the specified channel
      * 
      * The function is called within the user defined callback function 
      * 
      * @param channel_id Channel-ID
      * @param X Vector to store the Samples on
      */
-    void GetFrameSamps(unsigned int       channel_id,
-                std::vector<Sample_t>*    X){
-        unsigned int i = 0;
-        unsigned int ret_val = 1;
-        Sample_t s;
-        while (ret_val != 0) {
-            ret_val = synchronizer_interface::GetFrameSamp(framesync_[channel_id], &s, i);
-            if (ret_val == 1 && s != Sample_t{0.0f, 0.0f}) X->push_back(s);   // Store valid non-zero Sample
-            i++;                                 // Continue with next buffer position
-        };
+    unsigned int GetFrameLen(unsigned int       channel_id){
+        return synchronizer_interface::GetFrameLen(framesync_[channel_id]);
     };
 
     
