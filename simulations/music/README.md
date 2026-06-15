@@ -13,6 +13,7 @@ The additional ZMQ socket (`IMPORT_INTERFACE`) is not strictly required for the 
 | $\lambda$ | Wavelength corresponding to $f_c$                                      |
 | $\tau$    | Differential Time-delay between multipath-channels in seconds          |
 | $\Tau$    | Differential Time-delay between multipath-channels in Samples `DDELAY` |
+| $K$    | Upsamplingfactor |
 
 Note, that the current MUISC implementation is a narrowband DoA-estimation algorithm which only supports time-delays of $T<1$ between channels.  
 
@@ -38,29 +39,30 @@ for $\theta=30°$
 ```math
 \Tau = sin(30°)/(2*2.4121\ GHz) * 20\ MHz  = 2.07*10^{-3}\ samples
 ```
-One can observe, that the simulation of small ratios $\frac{f_S}{f_c}$ requires small fractional delays. To avoid this, an upsampling  is introduced which increases the sample-delay $T$ which is actually applied by the fractional-delay filter. The factor $\Tau$ is declared as `DDELAY`. 
+One can observe, that the simulation of small ratios $\frac{f_S}{f_c}$ requires small fractional delays. To avoid this, an int-valued upsampling by factor $K=\lceil \frac{1}{\Tau}\rceil$ is introduced which increases the sample-delay $T$ applied by the fractional-delay filter. The factor $\Tau$ is declared as `DDELAY` and $K$ is calculated accordingly. 
 
 ### Up-/Downconversion
 | Symbol   | Description                                 |
 | -------- | ------------------------------------------- |
 | $\phi_c$ | Carrier Phase Offset `CARRIER_PHASE_OFFSET` |
+| $\Delta f_c$ | Carrier Frequency Offset `CARRIER_FREQ_OFFSET` |
 
 Modulation of each $n$-th sample $x[n]$ with NCO (Numerically Controlled Oscillator):
 Analog Carrier Signal: 
 ```math
 exp(j2\pi f_c t + \phi_c)
 ```
-Time of the n-th sample (a baseband sample corresponds to a period of $\frac{1}{f_S}$ seconds):
+Notation of the n-th sample:
 ```math
-\qquad t=\frac{n}{f_S}
+\qquad x[n]=x(\frac{n}{f_S})
 ```
 Upconversion to `tx[n]`:
 ```math
-x[n] = x[n]*exp(j2\pi f_c*\frac{n}{f_S}) 
+x[n] := x[n]*exp(j2\pi f_c*\frac{n}{K*f_S}) 
 ```
 Downconversion to `rx[n]`: 
 ```math
-x[n] = x[n]*exp(-j(2\pi f_c*\frac{n}{f_S}+\phi_c))
+x[n] := x[n]*exp(-j(2\pi (f_c+\Delta f_c)*\frac{n}{K*f_S}+\phi_c))
 ```
 
 ### Signal power
