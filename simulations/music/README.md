@@ -14,29 +14,31 @@ The additional ZMQ socket (`IMPORT_INTERFACE`) is not strictly required for the 
 | $\tau$    | Differential Time-delay between multipath-channels in seconds          |
 | $\Tau$    | Differential Time-delay between multipath-channels in Samples `DDELAY` |
 
-Time-delay $\Tau$ between neighboring antennas in ULA with $\frac{\lambda}{2}$ spacing:
+Note, that the current MUISC implementation is a narrowband DoA-estimation algorithm which only supports time-delays of $T<1$ between channels.  
+
+The time-delay $\tau\ [s]$ between neighboring antennas in ULA with $\frac{\lambda}{2}$ spacing is given by:
 ```math
 \tau=\frac{sin(\theta)}{2*f_c}
 ```
+Assuming a sampling frequency of $f_S$ for the generated signal yields a time-delay $T$ in samples of
 ```math
 \Tau= \tau* f_S = 0.5*sin(\theta)*\frac{f_S}{f_c}
 ```
+e.g. OFDM signal with $M=64$ subcarriers and subcarrier-spacing $\Delta f = 312.5 kHz$, results in a sampling rate $f_S = M*\Delta f = 20MHz$. Let the signal be transmitted at a carrier frequency of $f_c = 2.4121\ GHz$. It follows, that 
 
-e.g. $\theta=60°$,  $f_c = 6.0e5\ Hz$, $f_S = 3.84e6\ Hz$
+for $\theta=60°$
 ```math
-\Tau = sin(60°)/(2*6.0e5\ Hz) * 3.84e6\ Hz  = 2.7713\ samples
+\Tau = sin(60°)/(2*2.4121\ GHz) * 20\ MHz  = 3.59*10^{-3}\ samples
 ```
-e.g. $\theta=45°$,  $f_c = 6.0e5\ Hz$, $f_S = 3.84e6\ Hz$
+for $\theta=45°$
 ```math
-\Tau = sin(45°)/(2*6.0e5\ Hz) * 3.84e6\ Hz = 2.2627\ samples
+\Tau = sin(45°)/(2*2.4121\ GHz) * 20\ MHz = 2.9315*10^{-3}\ samples
 ```
-e.g. $\theta=30°$,  $f_c = 6.0e5\ Hz$, $f_S = 3.84e6\ Hz$
+for $\theta=30°$
 ```math
-\Tau = sin(30°)/(2*6.0e5\ Hz) * 3.84e6\ Hz  = 1.6\ samples
+\Tau = sin(30°)/(2*2.4121\ GHz) * 20\ MHz  = 2.07*10^{-3}\ samples
 ```
-
-Note, that an increased basis-delay of approximately DELAY = 10 samples ensures a better performance of the fractional delay filter.
-
+One can observe, that the simulation of small ratios $\frac{f_S}{f_c}$ requires small fractional delays. To avoid this, an upsampling  is introduced which increases the sample-delay $T$ which is actually applied by the fractional-delay filter. The factor $\Tau$ is declared as `DDELAY`. 
 
 ### Up-/Downconversion
 | Symbol   | Description                                 |
@@ -84,7 +86,7 @@ All parameters are configured via preprocessor defines in `music_sim.cc`:
 | `FRAME_PADDING`     | 30      | Noisy samples around the frame (before and after) |
 | `NUM_CHANNELS`      | 4       | Number of simulated multipath channels            |
 | `SAMPLE_RATE`       | 3.84e6  | Sample rate [Hz]                                  |
-| `CARRIER_FREQUENCY` | 6.0e5   | Carrier frequency [Hz]                            |
+| `CARRIER_FREQUENCY` | 6.0e6   | Carrier frequency [Hz]                            |
 
 ### Channel Impairments
 

@@ -29,18 +29,18 @@
 using namespace doa4rfc;
 
 // Definition of the transmission-settings 
-#define FRAME_PADDING 20000         // Noisy samples around the frame (before and after) 
+#define FRAME_PADDING 300           // Noisy samples around the frame (before and after) 
 #define NUM_CHANNELS 4              // Number of simulated multipath channels 
-#define SAMPLE_RATE 3.84e6f         // Sample rate [Hz] 
-#define CARRIER_FREQUENCY 6.0e5f    // Carrier Frequency [Hz]
+#define SAMPLE_RATE 20e6f           // Sample rate [Hz] 
+#define CARRIER_FREQUENCY 2.4121e9f // Carrier Frequency [Hz]
 
 // Definition of the channel impairments
 #define NOISE_FLOOR -90.0f          // Noise floor (dB) 
 #define SNR_DB 40.0f                // Signal-to-noise ratio (dB) 
 #define CARRIER_FREQ_OFFSET 0.0f    // Carrier frequency offset (radians per sample)
 #define CARRIER_PHASE_OFFSET 0.0f   // Phase offset (radians) 
-#define DELAY 1.0f                  // Time-delay [Samples]
-#define DDELAY 1.6f                 // Differential Delay between receiving channels [Samples] 
+#define DELAY 1.0e-3f               // Time-delay [Samples]
+#define DDELAY 2.07e-3f             // Differential Delay between receiving channels [Samples] 
 
 // Frame-generator parameters (OFDMFRAME/FLEXFRAME)
 #define PAYLOAD_LEN 4                   // Payload length (bytes)
@@ -50,7 +50,7 @@ using namespace doa4rfc;
 #define FEC1 LIQUID_FEC_NONE            // Outer forward error-correction
 
 // Select Modulation Type 
-//#define FLEXFRAME
+// #define FLEXFRAME
 #define OFDMFRAME
 
 // ZMQ-socket for import of the generated baseband samples
@@ -84,8 +84,8 @@ int main(int argc, char*argv[])
     // ---------------------- Synchronization Worker ----------------------
     #ifdef OFDMFRAME
             //Define OFDM-Framesync parameters
-            constexpr unsigned int M           = 256;   // number of subcarriers 
-            constexpr unsigned int cp_len      = 20;    // cyclic prefix length 
+            constexpr unsigned int M           = 64;    // number of subcarriers 
+            constexpr unsigned int cp_len      = 16;    // cyclic prefix length 
             constexpr unsigned int taper_len   = 4;     // window taper length 
             static unsigned char p[M];                  // subcarrier allocation array
             ofdmframe_init_default_sctype(M, p);        // initialize subcarrier allocation
@@ -205,18 +205,44 @@ int main(int argc, char*argv[])
         flexframegen_destroy(fg);
     #endif
 
+    // ------------------- Interpolation and Carriermodulation ---------------------
+    // Upsampling factor: ensures DDELAY scales to >= 1 upsampled sample
+    unsigned int upsample_factor = static_cast<unsigned int>(std::ceil(1.0f / DDELAY));
+    unsigned int frame_len_up    = tx.size()    * upsample_factor;
+    unsigned int sequnece_len    = tx.size()    + FRAME_PADDING;
+    unsigned int sequence_len_up = sequnece_len * upsample_factor;
+
+    std::vector<Sample_t> tx_up(frame_len_up, Sample_t(0.0f, 0.0f));
+
+    // Interpolation 
+    if (upsample_factor > 1) {
+        firinterp_cccf interp_filt = firinterp_cccf_create_kaiser(upsample_factor, upsample_factor, 60.0f);
+        firinterp_cccf_execute_block(interp_filt, liquid_conv::Ptr(tx.data()), tx.size(), liquid_conv::Ptr(tx_up.data()));
+        firinterp_cccf_destroy(interp_filt);
+    } else {
+        tx_up = tx;
+        upsample_factor = 1;
+    }
+
+    // Upconversion to carrier 
+    nco_crcf nco_tx = nco_crcf_create(LIQUID_NCO);
+    nco_crcf_set_frequency(nco_tx, 2.0f * M_PI * CARRIER_FREQUENCY / (SAMPLE_RATE * (float)upsample_factor));
+    nco_crcf_mix_block_up(nco_tx, liquid_conv::Ptr(tx_up.data()), liquid_conv::Ptr(tx_up.data()), tx_up.size());
+    nco_crcf_destroy(nco_tx);
+
     // Add frame-sequence to matlab-export
-    m_xport.Add(tx, "TX_FRAME");
+    m_xport.Add(tx_up, "TX_FRAME");
     m_xport.Add("figure;subplot(2,1,1); hold on;plot(real(TX_FRAME), 'DisplayName', 'Re(TX_FRAME)');plot(imag(TX_FRAME), 'DisplayName', 'Im(TX_FRAME)');");
     m_xport.Add("subplot(2,1,2); hold on;plot(abs(TX_FRAME), 'DisplayName', 'TX_FRAME')");
     m_xport.Add("subplot(2,1,1); title('Samples'); xlabel('Sample Index'); ylabel('Amplitude'); legend; grid on;");
     m_xport.Add("subplot(2,1,2); title('Samples Magnitude'); xlabel('Sample Index'); ylabel('Magnitude'); legend; grid on;");
+    m_xport.Add("TX_FRAME_FFT = fftshift(fft(TX_FRAME));");
+    m_xport.Add("TX_FRAME_FREQ = (-length(TX_FRAME_FFT)/2 : length(TX_FRAME_FFT)/2 - 1) / length(TX_FRAME_FFT);");
+    m_xport.Add("figure;subplot(2,1,1); hold on;plot(TX_FRAME_FREQ, real(TX_FRAME_FFT), 'DisplayName', 'Re(FFT)');plot(TX_FRAME_FREQ, imag(TX_FRAME_FFT), 'DisplayName', 'Im(FFT)');");
+    m_xport.Add("subplot(2,1,1); title('FFT TX\\_FRAME'); xlabel('Normalized Frequency'); ylabel('Amplitude'); legend; grid on;");
+    m_xport.Add("subplot(2,1,2); hold on;plot(TX_FRAME_FREQ, abs(TX_FRAME_FFT), 'DisplayName', '|FFT|');");
+    m_xport.Add("subplot(2,1,2); title('FFT TX\\_FRAME Magnitude'); xlabel('Normalized Frequency'); ylabel('Magnitude'); legend; grid on;");
 
-    // ------------------- Upconversion ---------------------
-    nco_crcf nco_tx = nco_crcf_create(LIQUID_NCO);
-    nco_crcf_set_frequency(nco_tx, 2*M_PI*CARRIER_FREQUENCY/SAMPLE_RATE);
-    nco_crcf_mix_block_up(nco_tx, liquid_conv::Ptr(tx.data()), liquid_conv::Ptr(tx.data()), tx.size());
-    nco_crcf_destroy(nco_tx);                               
 
     // ------------------- Channel impairments and Downconversion ---------------------
     // Create reference channel
@@ -227,16 +253,15 @@ int main(int argc, char*argv[])
     unsigned int m          =   5;              // filter semi-length
     unsigned int npfb       =   1000;           // fractional delay resolution
 
-    // Initialize buffer to hold the received baseband signals
-    unsigned int sequnece_len = frame_len + FRAME_PADDING;
-Samples_2dim_t rx(NUM_CHANNELS, Samples_1dim_t(sequnece_len));           
+    // Output buffer at baseband rate
+    Samples_2dim_t rx(NUM_CHANNELS, Samples_1dim_t(sequnece_len));
 
     // Apply channel to the generated signal
     for (unsigned int ch = 0; ch < NUM_CHANNELS; ++ch) {
-        // Configure time delay 
+        // Configure time delay (scaled to upsampled rate)
         fdelay_crcf fd = fdelay_crcf_create(nmax, m, npfb);
-        float delay = DELAY+(float)(ch*DDELAY);
-        fdelay_crcf_set_delay(fd, delay);                                          
+        float delay = (DELAY + (float)(ch * DDELAY)) * (float)upsample_factor;
+        fdelay_crcf_set_delay(fd, delay);
 
         // Configure channel impairments
         channel_cccf channel = channel_cccf_copy(base_channel);             // Copy the base channel
@@ -244,20 +269,21 @@ Samples_2dim_t rx(NUM_CHANNELS, Samples_1dim_t(sequnece_len));
 
         // Configure Downconversion to complex baseband
         nco_crcf nco_rx = nco_crcf_create(LIQUID_NCO);
-        nco_crcf_set_frequency(nco_rx, CARRIER_FREQ_OFFSET + 2*M_PI*(CARRIER_FREQUENCY/SAMPLE_RATE));
+        nco_crcf_set_frequency(nco_rx, 2.0f * M_PI * CARRIER_FREQUENCY / (SAMPLE_RATE * (float)upsample_factor) + CARRIER_FREQ_OFFSET);
         nco_crcf_set_phase(nco_rx, CARRIER_PHASE_OFFSET);
 
-        // Insert the baseband-sequence into the longer sequence at the specified start position 'TF_SYMBOL_START'
-        InsertSequence(rx[ch].data(), tx.data(), FRAME_PADDING/2, frame_len);
+        // Temporary upsampled buffer; insert upsampled tx at the padded offset
+        std::vector<Sample_t> buf_up(sequence_len_up, Sample_t(0.0f, 0.0f));
+        InsertSequence(buf_up.data(), tx_up.data(), (FRAME_PADDING / 2) * upsample_factor, frame_len_up);
 
-        // Processing
-        for (unsigned int i = 0; i < sequnece_len; ++i) {
-            liquid_float_complex s_liquid = liquid_conv::Val(rx[ch][i]);
-            liquid_float_complex s_delayed;                              // separate output buffer
+        // Processing at upsampled rate
+        for (unsigned int i = 0; i < sequence_len_up; ++i) {
+            liquid_float_complex s_liquid = liquid_conv::Val(buf_up[i]);
+            liquid_float_complex s_delayed;
 
             // Apply Timedelay
             fdelay_crcf_push(fd, s_liquid);
-            fdelay_crcf_execute(fd, &s_delayed);                        // write to dedicated buffer
+            fdelay_crcf_execute(fd, &s_delayed);
 
             // Apply channel impairments (on the delayed sample)
             liquid_float_complex s_out;
@@ -267,19 +293,18 @@ Samples_2dim_t rx(NUM_CHANNELS, Samples_1dim_t(sequnece_len));
             nco_crcf_mix_down(nco_rx, s_out, &s_out);
             nco_crcf_step(nco_rx);
 
-            // Store result back to rx buffer
-            rx[ch][i] = Sample_t(s_out.real, s_out.imag);
+            buf_up[i] = Sample_t(s_out.real, s_out.imag);
         }
 
-        // Free Memory 
-        fdelay_crcf_destroy(fd);        
+        // Downsample back to baseband rate
+        for (unsigned int i = 0; i < sequnece_len; ++i)
+            rx[ch][i] = buf_up[i * upsample_factor];
+
+        // Free Memory
+        fdelay_crcf_destroy(fd);
         channel_cccf_destroy(channel);
-        nco_crcf_destroy(nco_rx);  
+        nco_crcf_destroy(nco_rx);
     }
-
-    // Destroy reference channel 
-    channel_cccf_destroy(base_channel);
-
 
     // ---------------------- Terminal Worker ----------------------
     TerminalWorker terminal(stop_signal_called);
