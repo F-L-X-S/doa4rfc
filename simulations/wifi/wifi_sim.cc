@@ -98,12 +98,7 @@ int main(int argc, char*argv[])
               << dataset[0][0].size() << " samples/channel) from " << DATASET_FILE << std::endl;
 
     // ---------------------- Synchronization Worker ----------------------
-    constexpr unsigned int M           = 64;    // number of subcarriers
-    constexpr unsigned int cp_len      = 16;    // cyclic prefix length
-    constexpr unsigned int taper_len   = 4;     // window taper length
-    static unsigned char p[M];                  // subcarrier allocation array
-    ofdmframe_init_default_sctype(M, p);        // initialize subcarrier allocation
-    SyncWorker<NUM_CHANNELS, ofdmflexframesync_iface> sync({M, cp_len, taper_len, p}, std::ref(stop_signal_called), 0);
+    SyncWorker<NUM_CHANNELS, wlanframesync_iface> sync({}, std::ref(stop_signal_called), 0);
 
     // ---------------------- Grouping Worker ----------------------
     GroupingWorker grouping_worker(NUM_CHANNELS, 1e6, std::ref(stop_signal_called));
@@ -161,7 +156,8 @@ int main(int argc, char*argv[])
     // Cycle through dataset frames, pushing each to the synchronization pipeline
     size_t frame_idx = 0;
     while (!stop_signal_called.load()) {
-        zmq_tx_external_worker.PushItemToQueue(tx_queue_external, dataset[frame_idx]);
+        auto rx_copy = dataset[frame_idx];
+        zmq_tx_external_worker.PushItemToQueue(tx_queue_external, std::move(rx_copy));
         frame_idx = (frame_idx + 1) % dataset.size();
         std::this_thread::sleep_for(std::chrono::milliseconds(5000));
     };

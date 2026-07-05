@@ -460,4 +460,135 @@ struct SyncTraits<flexframesync> {
  */
 using flexframesync_iface = SyncTraits<flexframesync>;
 
+
+// -------------------- IEEE802.11n OFDM Frame Synchronizer --------------------
+
+// custom IEEE802.11n frame synchronizer (C-implementation in multisync/src/wlanframesync.c)
+#include "wlanframesync.h"
+
+/**
+ * @brief SyncTraits specialization for the IEEE802.11n OFDM Frame Synchronizer wlanframesync.
+ * Defines the functions (Create, Reset, Execute, Destroy, GetFrameLen, GetFrameSyms) for the IEEE802.11n OFDM Frame Synchronizer.
+ *
+ * The 802.11n HT-mixed legacy preamble (L-STF/L-LTF, 64-pt FFT at 20 MHz) is fixed
+ * by the standard, so no subcarrier allocation parameters are required.
+ *
+ * @tparam  Synchronizer type
+ */
+
+template<>
+struct SyncTraits<wlanframesync> {
+
+    /**
+     * @brief Define the type of the synchronizer
+     *
+     */
+    using SynchronizerType = wlanframesync;
+
+    /**
+     * @brief Define the Parameters for the frame synchronizer Create function
+     *
+     */
+    struct CreateParams_t {
+
+    };
+
+    /**
+     * @brief C-compatible callback matching framesync_callback signature.
+     * Extracts CallbackWrapper from userdata and forwards to generic handler.
+     */
+    static int Callback(unsigned char *  _header,
+                        int              _header_valid,
+                        unsigned char *  _payload,
+                        unsigned int     _payload_len,
+                        int              _payload_valid,
+                        framesyncstats_s _stats,
+                        void *           _userdata)
+    {
+        auto* w = static_cast<CallbackWrapper*>(_userdata);
+        return w->handler(w->userdata);
+    };
+
+    /**
+     * @brief Wrapper function to create a frame synchronizer
+     *
+     * @param params Synchronizer parameters
+     * @param wrapper CallbackWrapper containing generic handler and real userdata
+     * @return SynchronizerType Created synchronizer instance
+     */
+    static SynchronizerType Create(const CreateParams_t& params, CallbackWrapper* wrapper)
+    {
+        return wlanframesync_create(Callback, wrapper);
+    };
+
+    /**
+     * @brief Wrapper function to reset a frame synchronizer
+     *
+     * @param fs
+     */
+    static void Reset(SynchronizerType fs)
+    {
+        wlanframesync_reset(fs);
+    };
+
+    /**
+     * @brief Wrapper function to execute a frame synchronizer
+     *
+     * @param fs Pointer to the synchronizer
+     * @param x Pointer to the input samples array
+     * @param n Number of input samples to read
+     * @return int Result of the execution
+     */
+    static int Execute(SynchronizerType fs, Sample_t* x, unsigned int n)
+    {
+        return wlanframesync_execute(fs, reinterpret_cast<liquid_float_complex*>(x), n);
+    };
+
+    /**
+     * @brief Wrapper function to destroy a frame synchronizer
+     *
+     * @param fs Pointer to the synchronizer
+     */
+    static void Destroy(SynchronizerType fs)
+    {
+        wlanframesync_destroy(fs);
+    };
+
+    /**
+     * @brief Wrapper function to get sample of the last frame received by the frame synchronizer.
+     *
+     * The function is called within the user defined callback function
+     *
+     * @param fs Pointer to the synchronizer
+     * @param _x buffer to store the sample on
+     * @param _pos Index of buffer position to read
+     */
+    static unsigned int GetFrameLen(SynchronizerType fs)
+    {
+        return wlanframesync_get_frame_len(fs);
+    };
+
+    /**
+     * @brief Wrapper function to get symbol of the last frame received by the frame synchronizer.
+     *
+     * The function is called within the user defined callback function
+     *
+     * @param fs Pointer to the synchronizer
+     * @param _x buffer to store the symbol on
+     * @param _pos Index of buffer position to read
+     */
+    static unsigned int GetFrameSym(SynchronizerType fs, Symbol_t* _x, unsigned int _pos)
+    {
+        liquid_float_complex* _x_liquid = liquid_conv::Ptr(_x);
+        return wlanframesync_get_sym(fs, _x_liquid, _pos);
+    };
+};
+
+/**
+ * @brief Define typename for IEEE802.11n frame synchronizer interface
+ *
+ */
+using wlanframesync_iface = SyncTraits<wlanframesync>;
+
+
 #endif // SYNCTRAITS_H
