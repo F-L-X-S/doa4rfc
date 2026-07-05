@@ -15,9 +15,11 @@
 %   where s[k] is the 802.11n baseband PPDU and w_n is AWGN.
 %
 % Output (.mat):
-%   rx_dataset  [N_rx x frame_len x num_frames]  complex baseband per element
-%   tx_dataset  [1    x frame_len x num_frames]  transmitted baseband signal
-%   params      struct                            all simulation parameters
+%   rx_dataset  [N_rx x seq_len x num_frames]  complex baseband per element
+%   tx_dataset  [1    x seq_len x num_frames]  transmitted baseband signal
+%   params      struct                          all simulation parameters
+%   (seq_len = frame_len + frame_padding; each PPDU is embedded in a
+%    noise-only padded sequence, starting at sample pad_pre+1)
 
 clear; clc;
 
@@ -37,7 +39,7 @@ mcs         = 7;        % MCS index (Nss = 1):
                         %   6: 64-QAM 3/4  → 58.5 Mbps
                         %   7: 64-QAM 5/6  → 65 Mbps
 guard_int   = 'Long';   % Guard interval: 'Long' (800 ns) | 'Short' (400 ns)
-psdu_length = 1000;     % PSDU payload length [bytes]
+psdu_length = 10;     % PSDU payload length [bytes]
 
 % --- ULA ---------------------------------------------------------
 N_rx          = 4;      % Number of receive elements
@@ -49,6 +51,8 @@ fc            = 2.4121e9; % Carrier frequency [Hz] (matches CARRIER_FREQUENCY in
 snr_db      = 20;       % Per-element SNR [dB]  (signal power normalised to 1)
 num_frames  = 100;      % Number of independent frames (PPDUs) in the dataset
 rand_seed   = 42;       % RNG seed for reproducibility
+frame_padding = 300;    % Noise-only samples around each frame (split before/after,
+                        % matches FRAME_PADDING in music_sim.cc)
 
 % --- Output ------------------------------------------------------
 output_dir  = 'simulations/wifi/records';
@@ -76,10 +80,15 @@ ind = wlanFieldIndices(cfg);          % Sample-index ranges of each PPDU field
 tx_trial  = wlanWaveformGenerator(zeros(8*psdu_length, 1), cfg);
 frame_len = numel(tx_trial);
 
+% Sequence length incl. noise-only padding (frame embedded at pad_pre offset)
+pad_pre = floor(frame_padding / 2);
+seq_len = frame_len + frame_padding;
+
 fprintf('802.11n config: %s  MCS=%d  GI=%s  PSDU=%d B\n', ...
         chan_bw, mcs, guard_int, psdu_length);
 fprintf('Sample rate:    %.0f MHz\n', f_s/1e6);
-fprintf('Frame length:   %d samples (%.1f us)\n\n', frame_len, frame_len/f_s*1e6);
+fprintf('Frame length:   %d samples (%.1f us)\n', frame_len, frame_len/f_s*1e6);
+fprintf('Sequence length: %d samples (%d noise padding)\n\n', seq_len, frame_padding);
 
 %% ================================================================
 %  ULA Array & Signal Collector  (Phased Array System Toolbox)
@@ -111,8 +120,8 @@ fprintf('ULA: %d elements  d = %.4f m (%.1f lambda)  DOA = %.1f deg  dphi = %.4f
 
 rng(rand_seed);
 
-rx_dataset = complex(zeros(N_rx, frame_len, num_frames));
-tx_dataset = complex(zeros(1,    frame_len, num_frames));
+rx_dataset = complex(zeros(N_rx, seq_len, num_frames));
+tx_dataset = complex(zeros(1,    seq_len, num_frames));
 
 noise_std  = sqrt(10^(-snr_db/10) / 2);   % Std per I/Q component (Pnoise = 10^(-SNR/10))
 
@@ -129,14 +138,18 @@ for frame = 1:num_frames
     % Normalise to unit average power
     tx_frame = tx_frame / sqrt(mean(abs(tx_frame).^2));
 
+    % --- Embed frame in noise-only padded sequence ---
+    tx_seq = complex(zeros(1, seq_len));
+    tx_seq(pad_pre+1 : pad_pre+frame_len) = tx_frame;
+
     % --- Collect signal at ULA elements (phased.Collector, narrowband) ---
-    rx_frame = collector(tx_frame.', [doa_deg; 0]).';  % [N_rx x frame_len]
+    rx_seq = collector(tx_seq.', [doa_deg; 0]).';      % [N_rx x seq_len]
 
-    % --- Independent AWGN per element ---
-    rx_frame = rx_frame + noise_std * (randn(N_rx, frame_len) + 1j*randn(N_rx, frame_len));
+    % --- Independent AWGN per element (over the full padded sequence) ---
+    rx_seq = rx_seq + noise_std * (randn(N_rx, seq_len) + 1j*randn(N_rx, seq_len));
 
-    rx_dataset(:, :, frame) = rx_frame;
-    tx_dataset(1, :, frame) = tx_frame;
+    rx_dataset(:, :, frame) = rx_seq;
+    tx_dataset(1, :, frame) = tx_seq;
 end
 fprintf(' done.\n');
 
@@ -155,7 +168,10 @@ params = struct( ...
     'psdu_length',    psdu_length,    ...  % PSDU length [bytes]
     'f_s',            f_s,            ...  % Sample rate [Hz]
     'frame_len',      frame_len,      ...  % Samples per PPDU
-    'field_indices',  ind,            ...  % PPDU field sample-index ranges
+    'frame_padding',  frame_padding,  ...  % Noise-only padding samples per sequence
+    'pad_pre',        pad_pre,        ...  % Noise samples before the frame
+    'seq_len',        seq_len,        ...  % Samples per padded sequence
+    'field_indices',  ind,            ...  % PPDU field sample-index ranges (relative to frame start, add pad_pre)
     'fc',             fc,             ...  % Carrier frequency [Hz]
     'lambda',         lambda,         ...  % Carrier wavelength [m]
     'd',              d,              ...  % Element spacing [m]
@@ -178,18 +194,19 @@ fprintf('  Frames: %d | Elements: %d | DOA: %.1f deg | SNR: %.0f dB | MCS: %d\n'
 %% ================================================================
 %  Binary export for C++ import  (wifi_sim.cc)
 %  ================================================================
-% Layout: [uint32 N_rx | uint32 frame_len | uint32 num_frames]
-%         [float32 re, float32 im] x frame_len, channel-major, per frame.
+% Layout: [uint32 N_rx | uint32 seq_len | uint32 num_frames]
+%         [float32 re, float32 im] x seq_len, channel-major, per frame.
+% Each frame is stored as its padded sequence (noise before/after the PPDU).
 % Samples stored as single-precision (float32) to match Sample_t = complex<float>.
 
 bin_file = strrep(output_file, '.mat', '.bin');
 fid = fopen(bin_file, 'wb');
 fwrite(fid, uint32(N_rx),       'uint32');
-fwrite(fid, uint32(frame_len),  'uint32');
+fwrite(fid, uint32(seq_len),    'uint32');
 fwrite(fid, uint32(num_frames), 'uint32');
 for fr = 1:num_frames
     for ch = 1:N_rx
-        samps = single(squeeze(rx_dataset(ch, :, fr)));  % [1 x frame_len] single
+        samps = single(squeeze(rx_dataset(ch, :, fr)));  % [1 x seq_len] single
         fwrite(fid, [real(samps); imag(samps)], 'float32');  % col-major: re0 im0 re1 im1 ...
     end
 end
@@ -210,22 +227,22 @@ sgtitle(sprintf('IEEE 802.11n  N_{rx}=%d  DOA=%.1f°  SNR=%.0f dB  |  %s  MCS%d 
 
 % --- Time domain with PPDU field markers (elem 1, frame 1) -------
 ax1 = subplot(2,3,1:2);
-t_us = (0:frame_len-1) / f_s * 1e6;
+t_us = (0:seq_len-1) / f_s * 1e6;
 plot(ax1, t_us, real(squeeze(rx_dataset(1,:,1))), 'b', ...
           t_us, imag(squeeze(rx_dataset(1,:,1))), 'r--');
 hold(ax1, 'on');
 for f = 1:numel(ppdu_fields)
     fn = ppdu_fields{f};
     if isfield(ind, fn)
-        t_start = (ind.(fn)(1) - 1) / f_s * 1e6;
+        t_start = (pad_pre + ind.(fn)(1) - 1) / f_s * 1e6;
         xline(ax1, t_start, '--', 'Color', field_clrs{f}, 'Alpha', 0.7, ...
               'Label', fn, 'LabelOrientation', 'horizontal', ...
               'LabelVerticalAlignment', 'top', 'FontSize', 7);
     end
 end
 xlabel(ax1, 'Time (\mus)'); ylabel(ax1, 'Amplitude');
-title(ax1, sprintf('RX elem 1 — PPDU (frame 1)  [%d samples, %.1f \mus]', ...
-      frame_len, frame_len/f_s*1e6));
+title(ax1, sprintf('RX elem 1 — padded PPDU (frame 1)  [%d samples, %.1f \mus]', ...
+      seq_len, seq_len/f_s*1e6));
 legend(ax1, 'Re','Im','Location','northeast'); grid(ax1, 'on');
 
 % --- PSD (elem 1, frame 1) ---------------------------------------
@@ -262,7 +279,7 @@ title(ax4, 'Cross-correlation elem 2 vs elem 1 (frame 1)'); grid(ax4, 'on');
 
 % --- Conventional Beamformer DOA scan using L-STF (known preamble)
 ax5 = subplot(2,3,6);
-stf_range = ind.LSTF(1):ind.LSTF(2);
+stf_range = (pad_pre + ind.LSTF(1)):(pad_pre + ind.LSTF(2));
 X_stf = squeeze(rx_dataset(:, stf_range, 1));   % [N_rx x N_stf]
 R_stf = X_stf * X_stf' / numel(stf_range);      % Spatial covariance [N_rx x N_rx]
 
