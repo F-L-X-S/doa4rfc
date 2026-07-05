@@ -20,66 +20,85 @@
  * THE SOFTWARE.
  */
 
-// OFDM frame synchronizer
+// IEEE 802.11n frame synchronizer (derived from liquid-dsp's wlanframesync)
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
 #include <assert.h>
+#include <complex.h>
 
-#include "liquid.internal.h"
+#include <liquid.h>
+#include "wlanframesync.h"
 
-#define DEBUG_OFDMFRAMESYNC             0
-#define DEBUG_OFDMFRAMESYNC_PRINT       0
-#define DEBUG_OFDMFRAMESYNC_FILENAME    "ofdmframesync_internal_debug.m"
-#define DEBUG_OFDMFRAMESYNC_BUFFER_LEN  (2048)
+// IEEE 802.11n, 20 MHz channelization: 64-pt FFT, long GI (800ns = 16 samples)
+#define WLANFRAMESYNC_M             64
+#define WLANFRAMESYNC_CP_LEN        16
+#define WLANFRAMESYNC_TAPER_LEN     0
 
-#define OFDMFRAMESYNC_ENABLE_SQUELCH    0
+// complex exponential (defined in liquid.internal.h, not part of the public API)
+#ifndef liquid_cexpjf
+#  define liquid_cexpjf(THETA) (cosf(THETA) + _Complex_I*sinf(THETA))
+#endif
+
+// PLCP S0/S1 sequence generators: exported by libliquid but declared only in
+// liquid.internal.h; used until replaced by the 802.11 L-STF/L-LTF sequences
+int ofdmframe_init_S0(unsigned char * _p, unsigned int _M,
+                      float complex * _S0, float complex * _s0, unsigned int * _M_S0);
+int ofdmframe_init_S1(unsigned char * _p, unsigned int _M,
+                      float complex * _S1, float complex * _s1, unsigned int * _M_S1);
+
+#define DEBUG_WLANFRAMESYNC             0
+#define DEBUG_WLANFRAMESYNC_PRINT       0
+#define DEBUG_WLANFRAMESYNC_FILENAME    "wlanframesync_internal_debug.m"
+#define DEBUG_WLANFRAMESYNC_BUFFER_LEN  (2048)
+
+#define WLANFRAMESYNC_ENABLE_SQUELCH    0
 
 // forward declaration of internal methods
 
-int ofdmframesync_execute_seekplcp(ofdmframesync _q);
-int ofdmframesync_execute_S0a(ofdmframesync _q);
-int ofdmframesync_execute_S0b(ofdmframesync _q);
-int ofdmframesync_execute_S1( ofdmframesync _q);
-int ofdmframesync_execute_rxsymbols(ofdmframesync _q);
+int wlanframesync_execute_seekplcp(wlanframesync _q);
+int wlanframesync_execute_S0a(wlanframesync _q);
+int wlanframesync_execute_S0b(wlanframesync _q);
+int wlanframesync_execute_S1( wlanframesync _q);
+int wlanframesync_execute_rxsymbols(wlanframesync _q);
 
-int ofdmframesync_S0_metrics(ofdmframesync   _q,
+int wlanframesync_S0_metrics(wlanframesync   _q,
                              float complex * _G,
                              float complex * _s_hat);
 
 // estimate short sequence gain
-//  _q      :   ofdmframesync object
+//  _q      :   wlanframesync object
 //  _x      :   input array (time)
 //  _G      :   output gain (freq)
-int ofdmframesync_estimate_gain_S0(ofdmframesync   _q,
+int wlanframesync_estimate_gain_S0(wlanframesync   _q,
                                    float complex * _x,
                                    float complex * _G);
 
 // estimate long sequence gain
-//  _q      :   ofdmframesync object
+//  _q      :   wlanframesync object
 //  _x      :   input array (time)
 //  _G      :   output gain (freq)
-int ofdmframesync_estimate_gain_S1(ofdmframesync _q,
+int wlanframesync_estimate_gain_S1(wlanframesync _q,
                                    float complex * _x,
                                    float complex * _G);
 
 // estimate complex equalizer gain from G0 and G1
-//  _q      :   ofdmframesync object
+//  _q      :   wlanframesync object
 //  _ntaps  :   number of time-domain taps for smoothing
-//int ofdmframesync_estimate_eqgain(ofdmframesync _q, unsigned int _ntaps);
+//int wlanframesync_estimate_eqgain(wlanframesync _q, unsigned int _ntaps);
 
 // estimate complex equalizer gain from G0 and G1 using polynomial fit
-//  _q      :   ofdmframesync object
+//  _q      :   wlanframesync object
 //  _order  :   polynomial order
-int ofdmframesync_estimate_eqgain_poly(ofdmframesync _q,
+int wlanframesync_estimate_eqgain_poly(wlanframesync _q,
                                        unsigned int _order);
 
 // recover symbol, correcting for gain, pilot phase, etc.
-int ofdmframesync_rxsymbol(ofdmframesync _q);
+int wlanframesync_rxsymbol(wlanframesync _q);
 
-struct ofdmframesync_s {
+struct wlanframesync_s {
     unsigned int M;         // number of subcarriers
     unsigned int M2;        // number of subcarriers (divided by 2)
     unsigned int cp_len;    // cyclic prefix length
@@ -100,7 +119,7 @@ struct ofdmframesync_s {
     float g_S1;             // S1 training symbols gain
 
     // transform object
-    FFT_PLAN fft;           // ifft object
+    fftplan fft;            // fft object
     float complex * X;      // frequency-domain buffer
     float complex * x;      // time-domain buffer
     windowcf input_buffer;  // input sequence buffer
@@ -122,11 +141,11 @@ struct ofdmframesync_s {
 
     // receiver state
     enum {
-        OFDMFRAMESYNC_STATE_SEEKPLCP=0,   // seek initial PLCP
-        OFDMFRAMESYNC_STATE_PLCPSHORT0,   // seek first PLCP short sequence
-        OFDMFRAMESYNC_STATE_PLCPSHORT1,   // seek second PLCP short sequence
-        OFDMFRAMESYNC_STATE_PLCPLONG,     // seek PLCP long sequence
-        OFDMFRAMESYNC_STATE_RXSYMBOLS     // receive payload symbols
+        WLANFRAMESYNC_STATE_SEEKPLCP=0,   // seek initial PLCP
+        WLANFRAMESYNC_STATE_PLCPSHORT0,   // seek first PLCP short sequence
+        WLANFRAMESYNC_STATE_PLCPSHORT1,   // seek second PLCP short sequence
+        WLANFRAMESYNC_STATE_PLCPLONG,     // seek PLCP long sequence
+        WLANFRAMESYNC_STATE_RXSYMBOLS     // receive payload symbols
     } state;
 
     // synchronizer objects
@@ -135,7 +154,7 @@ struct ofdmframesync_s {
     float phi_prime;        // ...
     float p1_prime;         // filtered pilot phase slope
 
-#if OFDMFRAMESYNC_ENABLE_SQUELCH
+#if WLANFRAMESYNC_ENABLE_SQUELCH
     // coarse signal detection
     float squelch_threshold;
     int squelch_enabled;
@@ -153,10 +172,10 @@ struct ofdmframesync_s {
     float plcp_sync_thresh;     // long symbol threshold, nominally 0.30
 
     // callback
-    ofdmframesync_callback callback;
+    framesync_callback callback;
     void * userdata;
 
-#if DEBUG_OFDMFRAMESYNC
+#if DEBUG_WLANFRAMESYNC
     int debug_enabled;
     int debug_objects_created;
     windowcf debug_x;
@@ -171,55 +190,54 @@ struct ofdmframesync_s {
 #endif
 };
 
-// create OFDM framing synchronizer object
-//  _M          :   number of subcarriers, >10 typical
-//  _cp_len     :   cyclic prefix length
-//  _taper_len  :   taper length (OFDM symbol overlap), TODO: remove? not used in this object
-//  _p          :   subcarrier allocation (null, pilot, data), [size: _M x 1]
+// initialize IEEE 802.11n HT-Data subcarrier allocation, 20 MHz (64-pt FFT):
+// 52 data, 4 pilots (k=+/-7, +/-21), nulls at DC, k=+/-29..31 and k=-32
+static void wlanframesync_init_sctype(unsigned int    _M,
+                                      unsigned char * _p)
+{
+    unsigned int i;
+    int k;
+    for (i=0; i<_M; i++)
+        _p[i] = OFDMFRAME_SCTYPE_NULL;
+    // positive active band, k=+1..+28
+    for (k=1; k<=28; k++)
+        _p[k] = OFDMFRAME_SCTYPE_DATA;
+    _p[7]  = OFDMFRAME_SCTYPE_PILOT;
+    _p[21] = OFDMFRAME_SCTYPE_PILOT;
+    // negative active band, k=-28..-1
+    for (k=-28; k<=-1; k++)
+        _p[_M + k] = OFDMFRAME_SCTYPE_DATA;
+    _p[_M - 7]  = OFDMFRAME_SCTYPE_PILOT;
+    _p[_M - 21] = OFDMFRAME_SCTYPE_PILOT;
+}
+
+// create IEEE 802.11n framing synchronizer object
 //  _callback   :   user-defined callback function
 //  _userdata   :   user-defined data pointer
-ofdmframesync ofdmframesync_create(unsigned int           _M,
-                                   unsigned int           _cp_len,
-                                   unsigned int           _taper_len,
-                                   unsigned char *        _p,
-                                   ofdmframesync_callback _callback,
-                                   void *                 _userdata)
+wlanframesync wlanframesync_create(framesync_callback _callback,
+                                   void *             _userdata)
 {
-    // validate input
-    if (_M < 8)
-        return liquid_error_config("ofdmframesync_create(), number of subcarriers must be at least 8");
-    if (_M % 2)
-        return liquid_error_config("ofdmframesync_create(), number of subcarriers must be even");
-    if (_cp_len > _M)
-        return liquid_error_config("ofdmframesync_create(), cyclic prefix length cannot exceed number of subcarriers");
-    if (_taper_len > _cp_len)
-        return liquid_error_config("ofdmframesync_create(), taper length cannot exceed cyclic prefix");
-
-    // allocate object and set parameters
-    ofdmframesync q = (ofdmframesync) malloc(sizeof(struct ofdmframesync_s));
-    q->M = _M;
-    q->cp_len = _cp_len;
-    q->taper_len = _taper_len;
+    // allocate object and set parameters (fixed by IEEE 802.11n, 20 MHz)
+    wlanframesync q = (wlanframesync) malloc(sizeof(struct wlanframesync_s));
+    q->M = WLANFRAMESYNC_M;
+    q->cp_len = WLANFRAMESYNC_CP_LEN;
+    q->taper_len = WLANFRAMESYNC_TAPER_LEN;
 
     // derived values
-    q->M2 = _M/2;
+    q->M2 = q->M/2;
 
     // subcarrier allocation
     q->p = (unsigned char*) malloc((q->M)*sizeof(unsigned char));
-    if (_p == NULL) {
-        ofdmframe_init_default_sctype(q->M, q->p);
-    } else {
-        memmove(q->p, _p, q->M*sizeof(unsigned char));
-    }
+    wlanframesync_init_sctype(q->M, q->p);
 
     // validate and count subcarrier allocation
     if (ofdmframe_validate_sctype(q->p, q->M, &q->M_null, &q->M_pilot, &q->M_data))
-        return liquid_error_config("ofdmframesync_create(), invalid subcarrier allocation");
+        return liquid_error_config("wlanframesync_create(), invalid subcarrier allocation");
 
     // create transform object
-    q->X = (float complex*) FFT_MALLOC((q->M)*sizeof(float complex));
-    q->x = (float complex*) FFT_MALLOC((q->M)*sizeof(float complex));
-    q->fft = FFT_CREATE_PLAN(q->M, q->x, q->X, FFT_DIR_FORWARD, FFT_METHOD);
+    q->X = (float complex*) malloc((q->M)*sizeof(float complex));
+    q->x = (float complex*) malloc((q->M)*sizeof(float complex));
+    q->fft = fft_create_plan(q->M, q->x, q->X, LIQUID_FFT_FORWARD, 0);
  
     // create input buffer the length of the transform
     q->input_buffer = windowcf_create(q->M + q->cp_len);
@@ -275,16 +293,16 @@ ofdmframesync ofdmframesync_create(unsigned int           _M,
     // set pilot sequence
     q->ms_pilot = msequence_create_default(8);
 
-#if OFDMFRAMESYNC_ENABLE_SQUELCH
+#if WLANFRAMESYNC_ENABLE_SQUELCH
     // coarse detection
     q->squelch_threshold = -25.0f;
     q->squelch_enabled = 0;
 #endif
 
     // reset object
-    ofdmframesync_reset(q);
+    wlanframesync_reset(q);
 
-#if DEBUG_OFDMFRAMESYNC
+#if DEBUG_WLANFRAMESYNC
     q->debug_enabled = 0;
     q->debug_objects_created = 0;
 
@@ -304,9 +322,9 @@ ofdmframesync ofdmframesync_create(unsigned int           _M,
     return q;
 }
 
-int ofdmframesync_destroy(ofdmframesync _q)
+int wlanframesync_destroy(wlanframesync _q)
 {
-#if DEBUG_OFDMFRAMESYNC
+#if DEBUG_WLANFRAMESYNC
     // destroy debugging objects
     if (_q->debug_x         != NULL) windowcf_destroy(_q->debug_x);
     if (_q->debug_rssi      != NULL) windowf_destroy(_q->debug_rssi);
@@ -323,9 +341,9 @@ int ofdmframesync_destroy(ofdmframesync _q)
 
     // free transform object
     windowcf_destroy(_q->input_buffer);
-    FFT_FREE(_q->X);
-    FFT_FREE(_q->x);
-    FFT_DESTROY_PLAN(_q->fft);
+    free(_q->X);
+    free(_q->x);
+    fft_destroy_plan(_q->fft);
 
     // clean up PLCP arrays
     free(_q->S0);
@@ -336,6 +354,7 @@ int ofdmframesync_destroy(ofdmframesync _q)
     // free gain arrays
     free(_q->G0a);
     free(_q->G0b);
+    free(_q->G1);
     free(_q->G);
     free(_q->B);
     free(_q->R);
@@ -349,9 +368,9 @@ int ofdmframesync_destroy(ofdmframesync _q)
     return LIQUID_OK;
 }
 
-int ofdmframesync_print(ofdmframesync _q)
+int wlanframesync_print(wlanframesync _q)
 {
-    printf("<liquid.ofdmframesync");
+    printf("<liquid.wlanframesync");
     printf(", subcarriers=%u", _q->M);
     printf(", null=%u", _q->M_null);
     printf(", pilot=%u", _q->M_pilot);
@@ -362,7 +381,7 @@ int ofdmframesync_print(ofdmframesync _q)
     return LIQUID_OK;
 }
 
-int ofdmframesync_reset(ofdmframesync _q)
+int wlanframesync_reset(wlanframesync _q)
 {
 #if 0
     // reset gain parameters
@@ -388,16 +407,16 @@ int ofdmframesync_reset(ofdmframesync _q)
     _q->plcp_sync_thresh   = (_q->M > 44) ? 0.30f : 0.30f + 0.01f*(44 - _q->M);
 
     // reset state
-    _q->state = OFDMFRAMESYNC_STATE_SEEKPLCP;
+    _q->state = WLANFRAMESYNC_STATE_SEEKPLCP;
     return LIQUID_OK;
 }
 
-int ofdmframesync_is_frame_open(ofdmframesync _q)
+int wlanframesync_is_frame_open(wlanframesync _q)
 {
-    return (_q->state == OFDMFRAMESYNC_STATE_SEEKPLCP) ? 0 : 1;
+    return (_q->state == WLANFRAMESYNC_STATE_SEEKPLCP) ? 0 : 1;
 }
 
-int ofdmframesync_execute(ofdmframesync   _q,
+int wlanframesync_execute(wlanframesync   _q,
                           float complex * _x,
                           unsigned int    _n)
 {
@@ -407,7 +426,7 @@ int ofdmframesync_execute(ofdmframesync   _q,
         x = _x[i];
 
         // correct for carrier frequency offset
-        if (_q->state != OFDMFRAMESYNC_STATE_SEEKPLCP) {
+        if (_q->state != WLANFRAMESYNC_STATE_SEEKPLCP) {
             nco_crcf_mix_down(_q->nco_rx, x, &x);
             nco_crcf_step(_q->nco_rx);
 
@@ -420,7 +439,7 @@ int ofdmframesync_execute(ofdmframesync   _q,
         // save input sample to buffer
         windowcf_push(_q->input_buffer,x);
 
-#if DEBUG_OFDMFRAMESYNC
+#if DEBUG_WLANFRAMESYNC
         if (_q->debug_enabled) {
             windowcf_push(_q->debug_x, x);
             windowf_push(_q->debug_rssi, crealf(x)*crealf(x) + cimagf(x)*cimagf(x));
@@ -428,36 +447,36 @@ int ofdmframesync_execute(ofdmframesync   _q,
 #endif
 
         switch (_q->state) {
-        case OFDMFRAMESYNC_STATE_SEEKPLCP:
-            ofdmframesync_execute_seekplcp(_q);
+        case WLANFRAMESYNC_STATE_SEEKPLCP:
+            wlanframesync_execute_seekplcp(_q);
             break;
-        case OFDMFRAMESYNC_STATE_PLCPSHORT0:
-            ofdmframesync_execute_S0a(_q);
+        case WLANFRAMESYNC_STATE_PLCPSHORT0:
+            wlanframesync_execute_S0a(_q);
             break;
-        case OFDMFRAMESYNC_STATE_PLCPSHORT1:
-            ofdmframesync_execute_S0b(_q);
+        case WLANFRAMESYNC_STATE_PLCPSHORT1:
+            wlanframesync_execute_S0b(_q);
             break;
-        case OFDMFRAMESYNC_STATE_PLCPLONG:
-            ofdmframesync_execute_S1(_q);
+        case WLANFRAMESYNC_STATE_PLCPLONG:
+            wlanframesync_execute_S1(_q);
             break;
-        case OFDMFRAMESYNC_STATE_RXSYMBOLS:
-            ofdmframesync_execute_rxsymbols(_q);
+        case WLANFRAMESYNC_STATE_RXSYMBOLS:
+            wlanframesync_execute_rxsymbols(_q);
             break;
         default:;
         }
 
     } // for (i=0; i<_n; i++)
     return LIQUID_OK;
-} // ofdmframesync_execute()
+} // wlanframesync_execute()
 
 // get receiver RSSI
-float ofdmframesync_get_rssi(ofdmframesync _q)
+float wlanframesync_get_rssi(wlanframesync _q)
 {
     return -10.0f*log10(_q->g0);
 }
 
 // get cfr estimate at specific position from buffer
-unsigned int ofdmframesync_get_cfr(ofdmframesync _q, 
+unsigned int wlanframesync_get_cfr(wlanframesync _q, 
                             liquid_float_complex * _x,
                             unsigned int _pos)
 {
@@ -472,13 +491,13 @@ unsigned int ofdmframesync_get_cfr(ofdmframesync _q,
 };
 
 // Get length of current frame (number of samples in current frame sequence)
-unsigned int ofdmframesync_get_frame_len(ofdmframesync _q)
+unsigned int wlanframesync_get_frame_len(wlanframesync _q)
 {
     return _q->frame_len;
 };
 
 // get data symbol at specific position from buffer
-unsigned int ofdmframesync_get_sym(ofdmframesync _q, 
+unsigned int wlanframesync_get_sym(wlanframesync _q, 
                             liquid_float_complex * _x,
                             unsigned int _pos)
 {
@@ -495,25 +514,25 @@ unsigned int ofdmframesync_get_sym(ofdmframesync _q,
 };
 
 // get size of fft 
-unsigned int ofdmframesync_get_fft_size(ofdmframesync _q)
+unsigned int wlanframesync_get_fft_size(wlanframesync _q)
 {
     return _q->M;
 };
 
 // Get NCO Object
-nco_crcf* ofdmframesync_get_nco(ofdmframesync _q)
+nco_crcf* wlanframesync_get_nco(wlanframesync _q)
 {
     return &(_q->nco_rx);
 }
 
 // get receiver carrier frequency offset estimate
-float ofdmframesync_get_cfo(ofdmframesync _q)
+float wlanframesync_get_cfo(wlanframesync _q)
 {
     return nco_crcf_get_frequency(_q->nco_rx);
 }
 
 // set receiver carrier frequency offset estimate
-int ofdmframesync_set_cfo(ofdmframesync _q, float _cfo)
+int wlanframesync_set_cfo(wlanframesync _q, float _cfo)
 {
     return nco_crcf_set_frequency(_q->nco_rx, _cfo);
 }
@@ -523,7 +542,7 @@ int ofdmframesync_set_cfo(ofdmframesync _q, float _cfo)
 //
 
 // frame detection
-int ofdmframesync_execute_seekplcp(ofdmframesync _q)
+int wlanframesync_execute_seekplcp(wlanframesync _q)
 {
     _q->timer++;
 
@@ -547,7 +566,7 @@ int ofdmframesync_execute_seekplcp(ofdmframesync _q)
     }
     g = (float)(_q->M) / g;
 
-#if OFDMFRAMESYNC_ENABLE_SQUELCH
+#if WLANFRAMESYNC_ENABLE_SQUELCH
     // TODO : squelch here
     if ( -10*log10f( sqrtf(g) ) < _q->squelch_threshold &&
          _q->squelch_enabled)
@@ -558,14 +577,14 @@ int ofdmframesync_execute_seekplcp(ofdmframesync _q)
 #endif
 
     // estimate S0 gain
-    ofdmframesync_estimate_gain_S0(_q, &rc[_q->cp_len], _q->G0a);
+    wlanframesync_estimate_gain_S0(_q, &rc[_q->cp_len], _q->G0a);
 
     float complex s_hat;
-    ofdmframesync_S0_metrics(_q, _q->G0a, &s_hat);
+    wlanframesync_S0_metrics(_q, _q->G0a, &s_hat);
     s_hat *= g;
 
     float tau_hat  = cargf(s_hat) * (float)(_q->M2) / (2*M_PI);
-#if DEBUG_OFDMFRAMESYNC_PRINT
+#if DEBUG_WLANFRAMESYNC_PRINT
     printf(" - gain=%12.3f, rssi=%12.8f, s_hat=%12.4f <%12.8f>, tau_hat=%8.3f\n",
             sqrt(g),
             -10*log10(g),
@@ -583,9 +602,9 @@ int ofdmframesync_execute_seekplcp(ofdmframesync _q)
         // set timer appropriately...
         _q->timer = (_q->M + dt) % (_q->M2);
         _q->timer += _q->M; // add delay to help ensure good S0 estimate
-        _q->state = OFDMFRAMESYNC_STATE_PLCPSHORT0;
+        _q->state = WLANFRAMESYNC_STATE_PLCPSHORT0;
 
-#if DEBUG_OFDMFRAMESYNC_PRINT
+#if DEBUG_WLANFRAMESYNC_PRINT
         printf("********** frame detected! ************\n");
         printf("    s_hat   :   %12.8f <%12.8f>\n", cabsf(s_hat), cargf(s_hat));
         printf("  tau_hat   :   %12.8f\n", tau_hat);
@@ -597,7 +616,7 @@ int ofdmframesync_execute_seekplcp(ofdmframesync _q)
 }
 
 // frame detection
-int ofdmframesync_execute_S0a(ofdmframesync _q)
+int wlanframesync_execute_S0a(wlanframesync _q)
 {
     //printf("t : %u\n", _q->timer);
     _q->timer++;
@@ -615,15 +634,15 @@ int ofdmframesync_execute_S0a(ofdmframesync _q)
     // TODO : re-estimate nominal gain
 
     // estimate S0 gain
-    ofdmframesync_estimate_gain_S0(_q, &rc[_q->cp_len], _q->G0a);
+    wlanframesync_estimate_gain_S0(_q, &rc[_q->cp_len], _q->G0a);
 
     float complex s_hat;
-    ofdmframesync_S0_metrics(_q, _q->G0a, &s_hat);
+    wlanframesync_S0_metrics(_q, _q->G0a, &s_hat);
     s_hat *= _q->g0;
 
     _q->s_hat_0 = s_hat;
 
-#if DEBUG_OFDMFRAMESYNC_PRINT
+#if DEBUG_WLANFRAMESYNC_PRINT
     float tau_hat  = cargf(s_hat) * (float)(_q->M2) / (2*M_PI);
     printf("********** S0[0] received ************\n");
     printf("    s_hat   :   %12.8f <%12.8f>\n", cabsf(s_hat), cargf(s_hat));
@@ -634,19 +653,19 @@ int ofdmframesync_execute_S0a(ofdmframesync _q)
     // TODO : also check for phase of s_hat (should be small)
     if (cabsf(s_hat) < 0.3f) {
         // false alarm
-#if DEBUG_OFDMFRAMESYNC_PRINT
+#if DEBUG_WLANFRAMESYNC_PRINT
         printf("false alarm S0[0]\n");
 #endif
-        ofdmframesync_reset(_q);
+        wlanframesync_reset(_q);
         return;
     }
 #endif
-    _q->state = OFDMFRAMESYNC_STATE_PLCPSHORT1;
+    _q->state = WLANFRAMESYNC_STATE_PLCPSHORT1;
     return LIQUID_OK;
 }
 
 // frame detection
-int ofdmframesync_execute_S0b(ofdmframesync _q)
+int wlanframesync_execute_S0b(wlanframesync _q)
 {
     //printf("t = %u\n", _q->timer);
     _q->timer++;
@@ -662,15 +681,15 @@ int ofdmframesync_execute_S0b(ofdmframesync _q)
     windowcf_read(_q->input_buffer, &rc);
 
     // estimate S0 gain
-    ofdmframesync_estimate_gain_S0(_q, &rc[_q->cp_len], _q->G0b);
+    wlanframesync_estimate_gain_S0(_q, &rc[_q->cp_len], _q->G0b);
 
     float complex s_hat;
-    ofdmframesync_S0_metrics(_q, _q->G0b, &s_hat);
+    wlanframesync_S0_metrics(_q, _q->G0b, &s_hat);
     s_hat *= _q->g0;
 
     _q->s_hat_1 = s_hat;
 
-#if DEBUG_OFDMFRAMESYNC_PRINT
+#if DEBUG_WLANFRAMESYNC_PRINT
     float tau_hat  = cargf(s_hat) * (float)(_q->M2) / (2*M_PI);
     printf("********** S0[1] received ************\n");
     printf("    s_hat   :   %12.8f <%12.8f>\n", cabsf(s_hat), cargf(s_hat));
@@ -689,11 +708,11 @@ int ofdmframesync_execute_S0b(ofdmframesync _q)
 
 #if 0
     if (cabsf(s_hat) < 0.3f) {
-#if DEBUG_OFDMFRAMESYNC_PRINT
+#if DEBUG_WLANFRAMESYNC_PRINT
         printf("false alarm S0[1]\n");
 #endif
         // false alarm
-        ofdmframesync_reset(_q);
+        wlanframesync_reset(_q);
         return;
     }
 #endif
@@ -716,18 +735,18 @@ int ofdmframesync_execute_S0b(ofdmframesync _q)
     float nu_hat = cargf(t0) / (float)(_q->M2);
 #endif
 
-#if DEBUG_OFDMFRAMESYNC_PRINT
+#if DEBUG_WLANFRAMESYNC_PRINT
     printf("   nu_hat   :   %12.8f\n", nu_hat);
 #endif
 
     // set NCO frequency
     nco_crcf_set_frequency(_q->nco_rx, nu_hat);
 
-    _q->state = OFDMFRAMESYNC_STATE_PLCPLONG;
+    _q->state = WLANFRAMESYNC_STATE_PLCPLONG;
     return LIQUID_OK;
 }
 
-int ofdmframesync_execute_S1(ofdmframesync _q)
+int wlanframesync_execute_S1(wlanframesync _q)
 {
     _q->timer--;
 
@@ -743,7 +762,7 @@ int ofdmframesync_execute_S1(ofdmframesync _q)
 
     // estimate S1 gain
     // TODO : add backoff in gain estimation
-    ofdmframesync_estimate_gain_S1(_q, &rc[_q->cp_len], _q->G);
+    wlanframesync_estimate_gain_S1(_q, &rc[_q->cp_len], _q->G);
 
     // compute detector output
     float complex g_hat = 0.0f;
@@ -758,7 +777,7 @@ int ofdmframesync_execute_S1(ofdmframesync _q)
     // rotate by complex phasor relative to timing backoff
     g_hat *= liquid_cexpjf((float)(_q->backoff)*2.0f*M_PI/(float)(_q->M));
 
-#if DEBUG_OFDMFRAMESYNC_PRINT
+#if DEBUG_WLANFRAMESYNC_PRINT
     printf("    g_hat   :   %12.4f <%12.8f>\n", cabsf(g_hat), cargf(g_hat));
 #endif
 
@@ -767,7 +786,7 @@ int ofdmframesync_execute_S1(ofdmframesync _q)
     //  2. phase should be very near zero (time aligned)
     if (cabsf(g_hat) > _q->plcp_sync_thresh && fabsf(cargf(g_hat)) < 0.1f*M_PI ) {
         //printf("    acquisition\n");
-        _q->state = OFDMFRAMESYNC_STATE_RXSYMBOLS;
+        _q->state = WLANFRAMESYNC_STATE_RXSYMBOLS;
         // reset timer
         _q->timer = _q->M + _q->cp_len + _q->backoff;
         _q->num_symbols = 0;
@@ -784,12 +803,12 @@ int ofdmframesync_execute_S1(ofdmframesync _q)
         //unsigned int ntaps = _q->M / 4;
         unsigned int ntaps = (_q->M < 8) ? 2 : 8;
         // FIXME : this is by far the most computationally complex part of synchronization
-        ofdmframesync_estimate_eqgain(_q, ntaps);
+        wlanframesync_estimate_eqgain(_q, ntaps);
 #else
         unsigned int poly_order = 4;
         if (poly_order >= _q->M_pilot + _q->M_data)
             poly_order = _q->M_pilot + _q->M_data - 1;
-        ofdmframesync_estimate_eqgain_poly(_q, poly_order);
+        wlanframesync_estimate_eqgain_poly(_q, poly_order);
 #endif
 
         // Store gain estimate
@@ -806,10 +825,10 @@ int ofdmframesync_execute_S1(ofdmframesync _q)
 
     // check if we are stuck searching for the S1 symbol
     if (_q->num_symbols == 16) {
-#if DEBUG_OFDMFRAMESYNC_PRINT
+#if DEBUG_WLANFRAMESYNC_PRINT
         printf("could not find S1 symbol. bailing...\n");
 #endif
-        ofdmframesync_reset(_q);
+        wlanframesync_reset(_q);
     }
 
     // 'reset' timer (wait another half symbol)
@@ -817,7 +836,7 @@ int ofdmframesync_execute_S1(ofdmframesync _q)
     return LIQUID_OK;
 }
 
-int ofdmframesync_execute_rxsymbols(ofdmframesync _q)
+int wlanframesync_execute_rxsymbols(wlanframesync _q)
 {
     // wait for timeout
     _q->timer--;
@@ -828,12 +847,12 @@ int ofdmframesync_execute_rxsymbols(ofdmframesync _q)
         float complex * rc;
         windowcf_read(_q->input_buffer, &rc);
         memmove(_q->x, &rc[_q->cp_len-_q->backoff], (_q->M)*sizeof(float complex));
-        FFT_EXECUTE(_q->fft);
+        fft_execute(_q->fft);
 
         // recover symbol in internal _q->X buffer
-        ofdmframesync_rxsymbol(_q);
+        wlanframesync_rxsymbol(_q);
 
-#if DEBUG_OFDMFRAMESYNC
+#if DEBUG_WLANFRAMESYNC
         if (_q->debug_enabled) {
             unsigned int i;
             for (i=0; i<_q->M; i++) {
@@ -844,10 +863,12 @@ int ofdmframesync_execute_rxsymbols(ofdmframesync _q)
 #endif
         // invoke callback
         if (_q->callback != NULL) {
-            int retval = _q->callback(_q->X, _q->p, _q->M, _q->userdata);
+            framesyncstats_s stats;
+            framesyncstats_init_default(&stats);
+            int retval = _q->callback(NULL, 1, NULL, 0, 1, stats, _q->userdata);
 
             if (retval != 0)
-                ofdmframesync_reset(_q);
+                wlanframesync_reset(_q);
         }
 
         // reset timer
@@ -857,7 +878,7 @@ int ofdmframesync_execute_rxsymbols(ofdmframesync _q)
 }
 
 // compute S0 metrics
-int ofdmframesync_S0_metrics(ofdmframesync   _q,
+int wlanframesync_S0_metrics(wlanframesync   _q,
                              float complex * _G,
                              float complex * _s_hat)
 {
@@ -879,10 +900,10 @@ int ofdmframesync_S0_metrics(ofdmframesync   _q,
 }
 
 // estimate short sequence gain
-//  _q      :   ofdmframesync object
+//  _q      :   wlanframesync object
 //  _x      :   input array (time), [size: M x 1]
 //  _G      :   output gain (freq)
-int ofdmframesync_estimate_gain_S0(ofdmframesync   _q,
+int wlanframesync_estimate_gain_S0(wlanframesync   _q,
                                    float complex * _x,
                                    float complex * _G)
 {
@@ -890,7 +911,7 @@ int ofdmframesync_estimate_gain_S0(ofdmframesync   _q,
     memmove(_q->x, _x, (_q->M)*sizeof(float complex));
 
     // compute fft, storing result into _q->X
-    FFT_EXECUTE(_q->fft);
+    fft_execute(_q->fft);
     
     // compute gain, ignoring NULL subcarriers
     unsigned int i;
@@ -913,10 +934,10 @@ int ofdmframesync_estimate_gain_S0(ofdmframesync   _q,
 }
 
 // estimate long sequence gain
-//  _q      :   ofdmframesync object
+//  _q      :   wlanframesync object
 //  _x      :   input array (time), [size: M x 1]
 //  _G      :   output gain (freq)
-int ofdmframesync_estimate_gain_S1(ofdmframesync _q,
+int wlanframesync_estimate_gain_S1(wlanframesync _q,
                                    float complex * _x,
                                    float complex * _G)
 {
@@ -924,7 +945,7 @@ int ofdmframesync_estimate_gain_S1(ofdmframesync _q,
     memmove(_q->x, _x, (_q->M)*sizeof(float complex));
 
     // compute fft, storing result into _q->X
-    FFT_EXECUTE(_q->fft);
+    fft_execute(_q->fft);
     
     // compute gain, ignoring NULL subcarriers
     unsigned int i;
@@ -947,12 +968,12 @@ int ofdmframesync_estimate_gain_S1(ofdmframesync _q,
 
 #if 0
 // estimate complex equalizer gain from G0 and G1
-//  _q      :   ofdmframesync object
+//  _q      :   wlanframesync object
 //  _ntaps  :   number of time-domain taps for smoothing
-int ofdmframesync_estimate_eqgain(ofdmframesync _q,
+int wlanframesync_estimate_eqgain(wlanframesync _q,
                                   unsigned int  _ntaps)
 {
-#if DEBUG_OFDMFRAMESYNC
+#if DEBUG_WLANFRAMESYNC
     if (_q->debug_enabled) {
         // copy pre-smoothed gain
         memmove(_q->G_hat, _q->G, _q->M*sizeof(float complex));
@@ -961,14 +982,14 @@ int ofdmframesync_estimate_eqgain(ofdmframesync _q,
 
     // validate input
     if (_ntaps == 0 || _ntaps > _q->M)
-        return liquid_error(LIQUID_EICONFIG,"ofdmframesync_estimate_eqgain(), ntaps must be in [1,M]");
+        return liquid_error(LIQUID_EICONFIG,"wlanframesync_estimate_eqgain(), ntaps must be in [1,M]");
 
     unsigned int i;
 
     // generate smoothing window (fft of temporal window)
     for (i=0; i<_q->M; i++)
         _q->x[i] = (i < _ntaps) ? 1.0f : 0.0f;
-    FFT_EXECUTE(_q->fft);
+    fft_execute(_q->fft);
 
     memmove(_q->G0a, _q->G, _q->M*sizeof(float complex));
 
@@ -999,7 +1020,7 @@ int ofdmframesync_estimate_eqgain(ofdmframesync _q,
 
         // eliminate divide-by-zero issues
         if (cabsf(w0) < 1e-4f) {
-            liquid_error(LIQUID_EINT,"ofdmframesync_estimate_eqgain(), weighting factor is zero");
+            liquid_error(LIQUID_EINT,"wlanframesync_estimate_eqgain(), weighting factor is zero");
             w0 = 1.0f;
         }
         _q->G[i] = G_hat / w0;
@@ -1009,12 +1030,12 @@ int ofdmframesync_estimate_eqgain(ofdmframesync _q,
 #endif
 
 // estimate complex equalizer gain from G0 and G1 using polynomial fit
-//  _q      :   ofdmframesync object
+//  _q      :   wlanframesync object
 //  _order  :   polynomial order
-int ofdmframesync_estimate_eqgain_poly(ofdmframesync _q,
+int wlanframesync_estimate_eqgain_poly(wlanframesync _q,
                                        unsigned int _order)
 {
-#if DEBUG_OFDMFRAMESYNC
+#if DEBUG_WLANFRAMESYNC
     if (_q->debug_enabled) {
         // copy pre-smoothed gain
         memmove(_q->G_hat, _q->G, _q->M*sizeof(float complex));
@@ -1041,7 +1062,7 @@ int ofdmframesync_estimate_eqgain_poly(ofdmframesync _q,
 
         if (_q->p[k] != OFDMFRAME_SCTYPE_NULL) {
             if (n == N)
-                return liquid_error(LIQUID_EINT,"ofdmframesync_estimate_eqgain_poly(), pilot subcarrier mismatch");
+                return liquid_error(LIQUID_EINT,"wlanframesync_estimate_eqgain_poly(), pilot subcarrier mismatch");
             // store resulting...
             x_freq[n] = (k > _q->M2) ? (float)k - (float)(_q->M) : (float)k;
             x_freq[n] = x_freq[n] / (float)(_q->M);
@@ -1054,7 +1075,7 @@ int ofdmframesync_estimate_eqgain_poly(ofdmframesync _q,
     }
 
     if (n != N)
-        return liquid_error(LIQUID_EINT,"ofdmframesync_estimate_eqgain_poly(), pilot subcarrier mismatch");
+        return liquid_error(LIQUID_EINT,"wlanframesync_estimate_eqgain_poly(), pilot subcarrier mismatch");
 
     // try to unwrap phase
     liquid_unwrap_phase(y_arg, N);
@@ -1088,7 +1109,7 @@ int ofdmframesync_estimate_eqgain_poly(ofdmframesync _q,
 }
 
 // recover symbol, correcting for gain, pilot phase, etc.
-int ofdmframesync_rxsymbol(ofdmframesync _q)
+int wlanframesync_rxsymbol(wlanframesync _q)
 {
     // apply gain
     unsigned int i;
@@ -1110,7 +1131,7 @@ int ofdmframesync_rxsymbol(ofdmframesync _q)
 
         if (_q->p[k]==OFDMFRAME_SCTYPE_PILOT) {
             if (n == _q->M_pilot)
-                return liquid_error(LIQUID_EINT,"ofdmframesync_estimate_eqgain_poly(), pilot subcarrier mismatch");
+                return liquid_error(LIQUID_EINT,"wlanframesync_estimate_eqgain_poly(), pilot subcarrier mismatch");
 
             pilot = (msequence_advance(_q->ms_pilot) ? 1.0f : -1.0f);
 #if 0
@@ -1130,7 +1151,7 @@ int ofdmframesync_rxsymbol(ofdmframesync _q)
     }
 
     if (n != _q->M_pilot)
-        return liquid_error(LIQUID_EINT,"ofdmframesync_estimate_eqgain_poly(), pilot subcarrier mismatch");
+        return liquid_error(LIQUID_EINT,"wlanframesync_estimate_eqgain_poly(), pilot subcarrier mismatch");
 
     // try to unwrap phase
     liquid_unwrap_phase(y_phase, _q->M_pilot);
@@ -1143,7 +1164,7 @@ int ofdmframesync_rxsymbol(ofdmframesync _q)
     p_phase[1] = alpha*p_phase[1] + (1-alpha)*_q->p1_prime;
     _q->p1_prime = p_phase[1];
 
-#if DEBUG_OFDMFRAMESYNC
+#if DEBUG_WLANFRAMESYNC
     if (_q->debug_enabled) {
         // save pilots
         memmove(_q->px, x_phase, _q->M_pilot*sizeof(float));
@@ -1197,47 +1218,47 @@ int ofdmframesync_rxsymbol(ofdmframesync _q)
 }
 
 // enable debugging
-int ofdmframesync_debug_enable(ofdmframesync _q)
+int wlanframesync_debug_enable(wlanframesync _q)
 {
     // create debugging objects if necessary
-#if DEBUG_OFDMFRAMESYNC
+#if DEBUG_WLANFRAMESYNC
     if (_q->debug_objects_created)
         return LIQUID_OK;
 
-    _q->debug_x         = windowcf_create(DEBUG_OFDMFRAMESYNC_BUFFER_LEN);
-    _q->debug_rssi      = windowf_create(DEBUG_OFDMFRAMESYNC_BUFFER_LEN);
-    _q->debug_framesyms = windowcf_create(DEBUG_OFDMFRAMESYNC_BUFFER_LEN);
+    _q->debug_x         = windowcf_create(DEBUG_WLANFRAMESYNC_BUFFER_LEN);
+    _q->debug_rssi      = windowf_create(DEBUG_WLANFRAMESYNC_BUFFER_LEN);
+    _q->debug_framesyms = windowcf_create(DEBUG_WLANFRAMESYNC_BUFFER_LEN);
     _q->G_hat           = (float complex*) malloc((_q->M)*sizeof(float complex));
 
     _q->px = (float*) malloc((_q->M_pilot)*sizeof(float));
     _q->py = (float*) malloc((_q->M_pilot)*sizeof(float));
 
-    _q->debug_pilot_0 = windowf_create(DEBUG_OFDMFRAMESYNC_BUFFER_LEN);
-    _q->debug_pilot_1 = windowf_create(DEBUG_OFDMFRAMESYNC_BUFFER_LEN);
+    _q->debug_pilot_0 = windowf_create(DEBUG_WLANFRAMESYNC_BUFFER_LEN);
+    _q->debug_pilot_1 = windowf_create(DEBUG_WLANFRAMESYNC_BUFFER_LEN);
 
     _q->debug_enabled   = 1;
     _q->debug_objects_created = 1;
     return LIQUID_OK;
 #else
-    return liquid_error(LIQUID_EICONFIG,"ofdmframesync_debug_enable(): compile-time debugging disabled");
+    return liquid_error(LIQUID_EICONFIG,"wlanframesync_debug_enable(): compile-time debugging disabled");
 #endif
 }
 
-int ofdmframesync_debug_disable(ofdmframesync _q)
+int wlanframesync_debug_disable(wlanframesync _q)
 {
     // disable debugging
-#if DEBUG_OFDMFRAMESYNC
+#if DEBUG_WLANFRAMESYNC
     _q->debug_enabled = 0;
     return LIQUID_OK;
 #else
-    return liquid_error(LIQUID_EICONFIG,"ofdmframesync_debug_disable(): compile-time debugging disabled");
+    return liquid_error(LIQUID_EICONFIG,"wlanframesync_debug_disable(): compile-time debugging disabled");
 #endif
 }
 
-int ofdmframesync_debug_print(ofdmframesync _q,
+int wlanframesync_debug_print(wlanframesync _q,
                               const char * _filename)
 {
-#if DEBUG_OFDMFRAMESYNC
+#if DEBUG_WLANFRAMESYNC
     if (!_q->debug_objects_created)
         return liquid_error(LIQUID_EICONFIG,"ofdmframe_debug_print(), debugging objects don't exist; enable debugging first");
 
@@ -1245,10 +1266,10 @@ int ofdmframesync_debug_print(ofdmframesync _q,
     if (fid==NULL)
         return liquid_error(LIQUID_EIO,"ofdmframe_debug_print(), could not open '%s' for writing", _filename);
 
-    fprintf(fid,"%% %s : auto-generated file\n", DEBUG_OFDMFRAMESYNC_FILENAME);
+    fprintf(fid,"%% %s : auto-generated file\n", DEBUG_WLANFRAMESYNC_FILENAME);
     fprintf(fid,"close all;\n");
     fprintf(fid,"clear all;\n");
-    fprintf(fid,"n = %u;\n", DEBUG_OFDMFRAMESYNC_BUFFER_LEN);
+    fprintf(fid,"n = %u;\n", DEBUG_WLANFRAMESYNC_BUFFER_LEN);
     fprintf(fid,"M = %u;\n", _q->M);
     fprintf(fid,"M_null  = %u;\n", _q->M_null);
     fprintf(fid,"M_pilot = %u;\n", _q->M_pilot);
@@ -1273,7 +1294,7 @@ int ofdmframesync_debug_print(ofdmframesync _q,
 
     fprintf(fid,"x = zeros(1,n);\n");
     windowcf_read(_q->debug_x, &rc);
-    for (i=0; i<DEBUG_OFDMFRAMESYNC_BUFFER_LEN; i++)
+    for (i=0; i<DEBUG_WLANFRAMESYNC_BUFFER_LEN; i++)
         fprintf(fid,"x(%4u) = %12.4e + j*%12.4e;\n", i+1, crealf(rc[i]), cimagf(rc[i]));
     fprintf(fid,"figure;\n");
     fprintf(fid,"plot(0:(n-1),real(x),0:(n-1),imag(x));\n");
@@ -1288,9 +1309,9 @@ int ofdmframesync_debug_print(ofdmframesync _q,
 
     // write agc_rssi
     fprintf(fid,"\n\n");
-    fprintf(fid,"agc_rssi = zeros(1,%u);\n", DEBUG_OFDMFRAMESYNC_BUFFER_LEN);
+    fprintf(fid,"agc_rssi = zeros(1,%u);\n", DEBUG_WLANFRAMESYNC_BUFFER_LEN);
     windowf_read(_q->debug_rssi, &r);
-    for (i=0; i<DEBUG_OFDMFRAMESYNC_BUFFER_LEN; i++)
+    for (i=0; i<DEBUG_WLANFRAMESYNC_BUFFER_LEN; i++)
         fprintf(fid,"agc_rssi(%4u) = %12.4e;\n", i+1, r[i]);
     fprintf(fid,"agc_rssi = filter([0.00362168 0.00724336 0.00362168],[1 -1.82269490 0.83718163],agc_rssi);\n");
     fprintf(fid,"agc_rssi = 10*log10( agc_rssi );\n");
@@ -1349,12 +1370,12 @@ int ofdmframesync_debug_print(ofdmframesync _q,
     // save pilot history
     fprintf(fid,"p0 = zeros(1,M);\n");
     windowf_read(_q->debug_pilot_0, &r);
-    for (i=0; i<DEBUG_OFDMFRAMESYNC_BUFFER_LEN; i++)
+    for (i=0; i<DEBUG_WLANFRAMESYNC_BUFFER_LEN; i++)
         fprintf(fid,"p0(%4u) = %12.4e;\n", i+1, r[i]);
 
     fprintf(fid,"p1 = zeros(1,M);\n");
     windowf_read(_q->debug_pilot_1, &r);
-    for (i=0; i<DEBUG_OFDMFRAMESYNC_BUFFER_LEN; i++)
+    for (i=0; i<DEBUG_WLANFRAMESYNC_BUFFER_LEN; i++)
         fprintf(fid,"p1(%4u) = %12.4e;\n", i+1, r[i]);
 
     fprintf(fid,"figure;\n");
@@ -1378,7 +1399,7 @@ int ofdmframesync_debug_print(ofdmframesync _q,
     // write frame symbols
     fprintf(fid,"framesyms = zeros(1,n);\n");
     windowcf_read(_q->debug_framesyms, &rc);
-    for (i=0; i<DEBUG_OFDMFRAMESYNC_BUFFER_LEN; i++)
+    for (i=0; i<DEBUG_WLANFRAMESYNC_BUFFER_LEN; i++)
         fprintf(fid,"framesyms(%4u) = %12.4e + j*%12.4e;\n", i+1, crealf(rc[i]), cimagf(rc[i]));
     fprintf(fid,"figure;\n");
     fprintf(fid,"plot(real(framesyms), imag(framesyms), 'x');\n");
@@ -1389,10 +1410,10 @@ int ofdmframesync_debug_print(ofdmframesync _q,
     fprintf(fid,"grid on;\n");
 
     fclose(fid);
-    printf("ofdmframesync/debug: results written to '%s'\n", _filename);
+    printf("wlanframesync/debug: results written to '%s'\n", _filename);
     return LIQUID_OK;
 #else
-    return liquid_error(LIQUID_EICONFIG,"ofdmframesync_debug_print(): compile-time debugging disabled");
+    return liquid_error(LIQUID_EICONFIG,"wlanframesync_debug_print(): compile-time debugging disabled");
 #endif
 }
 
