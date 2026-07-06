@@ -98,7 +98,24 @@ int main(int argc, char*argv[])
               << dataset[0][0].size() << " samples/channel) from " << DATASET_FILE << std::endl;
 
     // ---------------------- Synchronization Worker ----------------------
-    SyncWorker<NUM_CHANNELS, wlanframesync_iface> sync({}, std::ref(stop_signal_called), 0);
+    // IEEE 802.11n HT-mixed, 20 MHz: compose the synchronizer configuration
+    // from the preset helpers in wlanframesync.h
+    constexpr unsigned int M          = 64;   // FFT size (20 MHz channelization)
+    constexpr unsigned int cp_len     = 16;   // cyclic prefix length (long GI: 800ns = 16 samples)
+    constexpr unsigned int stf_period = 16;   // L-STF time-domain periodicity (0.8us = 16 samples)
+    constexpr unsigned int ltf_count  = 2;    // L-LTF long training symbol repetitions
+    static unsigned char p[M];                // subcarrier allocation (52 data, 4 pilots)
+    static liquid_float_complex stf_seq[M];   // L-STF training sequence (freq)
+    static liquid_float_complex ltf_seq[M];   // L-LTF training sequence (freq)
+    static float pilot_base[4];               // 20 MHz pilot base pattern
+    wlanframesync_init_sctype_80211n_20(M, p);
+    wlanframesync_init_lstf_80211(M, stf_seq);
+    wlanframesync_init_lltf_80211(M, ltf_seq);
+    wlanframesync_init_pilot_base_80211_20(pilot_base);
+
+    SyncWorker<NUM_CHANNELS, wlanframesync_iface> sync(
+        {{M, cp_len, p, stf_seq, stf_period, ltf_seq, ltf_count, pilot_base}},
+        std::ref(stop_signal_called), 0);
 
     // ---------------------- Grouping Worker ----------------------
     GroupingWorker grouping_worker(NUM_CHANNELS, 1e6, std::ref(stop_signal_called));

@@ -32,11 +32,6 @@
 #include <liquid.h>
 #include "wlanframesync.h"
 
-// IEEE 802.11n, 20 MHz channelization: 64-pt FFT, long GI (800ns = 16 samples)
-#define WLANFRAMESYNC_M             64
-#define WLANFRAMESYNC_CP_LEN        16
-#define WLANFRAMESYNC_TAPER_LEN     0
-
 // complex exponential (defined in liquid.internal.h, not part of the public API)
 #ifndef liquid_cexpjf
 #  define liquid_cexpjf(THETA) (cosf(THETA) + _Complex_I*sinf(THETA))
@@ -55,8 +50,6 @@ static const float wlan_pilot_polarity[127] = {
     -1, 1,-1,-1,-1, 1, 1, 1,-1,-1,-1,-1,-1,-1,-1
 };
 
-// pilot base pattern for subcarriers k = {-21,-7,+7,+21} (IEEE 802.11-2012, Eq. 18-22)
-static const float wlan_pilot_base[4] = { 1, 1, 1,-1 };
 
 #define DEBUG_WLANFRAMESYNC             0
 #define DEBUG_WLANFRAMESYNC_PRINT       0
@@ -109,12 +102,14 @@ int wlanframesync_estimate_eqgain_poly(wlanframesync _q,
 int wlanframesync_rxsymbol(wlanframesync _q);
 
 struct wlanframesync_s {
-    unsigned int M;         // number of subcarriers
-    unsigned int M2;        // number of subcarriers (divided by 2)
-    unsigned int cp_len;    // cyclic prefix length
-    unsigned char * p;      // subcarrier allocation (null, pilot, data)
-    unsigned int taper_len; // number of samples in tapering window/overlap
-    unsigned int frame_len; // number of frame samples 
+    unsigned int M;          // number of subcarriers
+    unsigned int M2;         // number of subcarriers (divided by 2)
+    unsigned int cp_len;     // cyclic prefix length
+    unsigned char * p;       // subcarrier allocation (null, pilot, data)
+    unsigned int stf_period; // time-domain STF periodicity in samples
+    unsigned int ltf_count;  // number of repeated LTF training symbols (1 or 2)
+    float * pilot_base;      // pilot base pattern, ascending k, [size: M_pilot x 1]
+    unsigned int frame_len;  // number of frame samples
 
     // constants
     unsigned int M_null;    // number of null subcarriers
@@ -202,9 +197,13 @@ struct wlanframesync_s {
 
 // initialize IEEE 802.11n HT-Data subcarrier allocation, 20 MHz (64-pt FFT):
 // 52 data, 4 pilots (k=+/-7, +/-21), nulls at DC, k=+/-29..31 and k=-32
-static void wlanframesync_init_sctype(unsigned int    _M,
-                                      unsigned char * _p)
+int wlanframesync_init_sctype_80211n_20(unsigned int    _M,
+                                        unsigned char * _p)
 {
+    // validate input (allocation defined for the 64-pt FFT at 20 MHz)
+    if (_M < 64)
+        return liquid_error(LIQUID_EICONFIG,"wlanframesync_init_sctype_80211n_20(), fft size must be at least 64");
+
     unsigned int i;
     int k;
     for (i=0; i<_M; i++)
@@ -219,101 +218,159 @@ static void wlanframesync_init_sctype(unsigned int    _M,
         _p[_M + k] = OFDMFRAME_SCTYPE_DATA;
     _p[_M - 7]  = OFDMFRAME_SCTYPE_PILOT;
     _p[_M - 21] = OFDMFRAME_SCTYPE_PILOT;
+    return LIQUID_OK;
 }
 
-// initialize L-STF short training sequence (IEEE 802.11-2012, Eq. 18-6)
-//  _M      :   total number of subcarriers (64)
-//  _S0     :   output sequence (freq), 12 active tones at k = +/-4,8,...,24
-//  _s0     :   output sequence (time), periodic in _M/4 = 16 samples
-//  _M_S0   :   output number of enabled subcarriers in L-STF (12)
-static int wlanframesync_init_LSTF(unsigned int    _M,
-                                   float complex * _S0,
-                                   float complex * _s0,
-                                   unsigned int *  _M_S0)
+// initialize L-STF short training sequence (IEEE 802.11-2012, Eq. 18-6):
+// 12 active tones at k = +/-4,8,...,24, time-domain periodic in 16 samples
+//  _M        :   total number of subcarriers (64)
+//  _stf_seq  :   output sequence (freq), [size: _M x 1]
+int wlanframesync_init_lstf_80211(unsigned int           _M,
+                                  liquid_float_complex * _stf_seq)
 {
+    // validate input (sequence defined for the 64-pt FFT at 20 MHz)
+    if (_M < 64)
+        return liquid_error(LIQUID_EICONFIG,"wlanframesync_init_lstf_80211(), fft size must be at least 64");
+
     // L-STF tones with values (+/-1 +/-j)/sqrt(2); the standard's sqrt(13/6)
     // power scaling is dropped for unit tone magnitude (the received power is
     // normalized separately in the detection metrics)
     static const int   k_lstf[12] = {-24,-20,-16,-12, -8, -4,  4,  8, 12, 16, 20, 24};
     static const float b_lstf[12] = {  1, -1,  1, -1, -1,  1, -1, -1,  1,  1,  1,  1};
 
+    float complex * S = (float complex*) _stf_seq;
     unsigned int i;
     for (i=0; i<_M; i++)
-        _S0[i] = 0.0f;
+        S[i] = 0.0f;
     for (i=0; i<12; i++) {
         unsigned int j = (unsigned int)((k_lstf[i] + (int)_M) % (int)_M);
-        _S0[j] = b_lstf[i] * (1.0f + _Complex_I*1.0f) * (float)M_SQRT1_2;
+        S[j] = b_lstf[i] * (1.0f + _Complex_I*1.0f) * (float)M_SQRT1_2;
     }
-    *_M_S0 = 12;
-
-    // run inverse fft to get time-domain sequence
-    fft_run(_M, _S0, _s0, LIQUID_FFT_BACKWARD, 0);
-
-    // normalize time-domain sequence level
-    float g = 1.0f / sqrtf(12.0f);
-    for (i=0; i<_M; i++)
-        _s0[i] *= g;
     return LIQUID_OK;
 }
 
-// initialize L-LTF long training sequence (IEEE 802.11-2012, Eq. 18-8)
-//  _M      :   total number of subcarriers (64)
-//  _S1     :   output sequence (freq), BPSK on the 52 active tones k = +/-1..26
-//  _s1     :   output sequence (time)
-//  _M_S1   :   output number of enabled subcarriers in L-LTF (52)
-static int wlanframesync_init_LLTF(unsigned int    _M,
-                                   float complex * _S1,
-                                   float complex * _s1,
-                                   unsigned int *  _M_S1)
+// initialize L-LTF long training sequence (IEEE 802.11-2012, Eq. 18-8):
+// BPSK on the 52 active tones k = +/-1..26, transmitted twice
+//  _M        :   total number of subcarriers (64)
+//  _ltf_seq  :   output sequence (freq), [size: _M x 1]
+int wlanframesync_init_lltf_80211(unsigned int           _M,
+                                  liquid_float_complex * _ltf_seq)
 {
+    // validate input (sequence defined for the 64-pt FFT at 20 MHz)
+    if (_M < 64)
+        return liquid_error(LIQUID_EICONFIG,"wlanframesync_init_lltf_80211(), fft size must be at least 64");
+
     // L-LTF sequence for k = -26..+26 (array index k+26), DC null at k=0
     static const float b_lltf[53] = {
          1, 1,-1,-1, 1, 1,-1, 1,-1, 1, 1, 1, 1, 1, 1,-1,-1, 1, 1,-1, 1,-1, 1, 1, 1, 1,
          0,
          1,-1,-1, 1, 1,-1, 1,-1, 1,-1,-1,-1,-1,-1, 1, 1,-1,-1, 1,-1, 1,-1, 1, 1, 1, 1};
 
+    float complex * S = (float complex*) _ltf_seq;
     unsigned int i;
     int k;
     for (i=0; i<_M; i++)
-        _S1[i] = 0.0f;
+        S[i] = 0.0f;
     for (k=-26; k<=26; k++) {
         unsigned int j = (unsigned int)((k + (int)_M) % (int)_M);
-        _S1[j] = b_lltf[k+26];
+        S[j] = b_lltf[k+26];
     }
-    *_M_S1 = 52;
-
-    // run inverse fft to get time-domain sequence
-    fft_run(_M, _S1, _s1, LIQUID_FFT_BACKWARD, 0);
-
-    // normalize time-domain sequence level
-    float g = 1.0f / sqrtf(52.0f);
-    for (i=0; i<_M; i++)
-        _s1[i] *= g;
     return LIQUID_OK;
 }
 
-// create IEEE 802.11n framing synchronizer object
+// initialize 20 MHz pilot base pattern for subcarriers k = {-21,-7,+7,+21}
+// (IEEE 802.11-2012, Eq. 18-22)
+//  _pilot_base :   output pattern, [size: 4 x 1]
+int wlanframesync_init_pilot_base_80211_20(float * _pilot_base)
+{
+    _pilot_base[0] =  1.0f;     // k = -21
+    _pilot_base[1] =  1.0f;     // k =  -7
+    _pilot_base[2] =  1.0f;     // k =  +7
+    _pilot_base[3] = -1.0f;     // k = +21
+    return LIQUID_OK;
+}
+
+// copy a freq-domain training sequence, count its active tones and compute
+// the normalized time-domain sequence
+//  _M      :   total number of subcarriers
+//  _seq    :   input sequence (freq), zeros on inactive tones, [size: _M x 1]
+//  _S      :   output sequence (freq), [size: _M x 1]
+//  _s      :   output sequence (time), [size: _M x 1]
+//  _M_S    :   output number of active tones
+static int wlanframesync_load_seq(unsigned int                 _M,
+                                  const liquid_float_complex * _seq,
+                                  float complex *              _S,
+                                  float complex *              _s,
+                                  unsigned int *               _M_S)
+{
+    unsigned int i;
+    unsigned int M_S = 0;
+    for (i=0; i<_M; i++) {
+        _S[i] = ((const float complex*)_seq)[i];
+        if (crealf(_S[i]) != 0.0f || cimagf(_S[i]) != 0.0f)
+            M_S++;
+    }
+    *_M_S = M_S;
+
+    // ensure at least one tone is active
+    if (M_S == 0)
+        return liquid_error(LIQUID_EICONFIG,"wlanframesync_load_seq(), no active tones in training sequence");
+
+    // run inverse fft to get time-domain sequence
+    fft_run(_M, _S, _s, LIQUID_FFT_BACKWARD, 0);
+
+    // normalize time-domain sequence level
+    float g = 1.0f / sqrtf((float)M_S);
+    for (i=0; i<_M; i++)
+        _s[i] *= g;
+    return LIQUID_OK;
+}
+
+// create WLAN framing synchronizer object
+//  _config     :   standard-dependent synchronizer configuration (copied)
 //  _callback   :   user-defined callback function
 //  _userdata   :   user-defined data pointer
-wlanframesync wlanframesync_create(framesync_callback _callback,
+wlanframesync wlanframesync_create(const wlanframesync_config_t * _config,
+                                   framesync_callback _callback,
                                    void *             _userdata)
 {
-    // allocate object and set parameters (fixed by IEEE 802.11n, 20 MHz)
+    // validate input
+    if (_config == NULL)
+        return liquid_error_config("wlanframesync_create(), configuration is NULL");
+    if (_config->p == NULL || _config->stf_seq == NULL || _config->ltf_seq == NULL || _config->pilot_base == NULL)
+        return liquid_error_config("wlanframesync_create(), subcarrier allocation, training sequences and pilot pattern are required");
+    if (_config->M < 8)
+        return liquid_error_config("wlanframesync_create(), number of subcarriers must be at least 8");
+    if (_config->M % 2)
+        return liquid_error_config("wlanframesync_create(), number of subcarriers must be even");
+    if (_config->cp_len > _config->M)
+        return liquid_error_config("wlanframesync_create(), cyclic prefix length cannot exceed number of subcarriers");
+    if (_config->stf_period == 0 || ((_config->M/2) % _config->stf_period))
+        return liquid_error_config("wlanframesync_create(), STF period must divide half the fft size");
+    if (_config->ltf_count < 1 || _config->ltf_count > 2)
+        return liquid_error_config("wlanframesync_create(), LTF count must be 1 or 2");
+
+    // allocate object and copy configuration
     wlanframesync q = (wlanframesync) malloc(sizeof(struct wlanframesync_s));
-    q->M = WLANFRAMESYNC_M;
-    q->cp_len = WLANFRAMESYNC_CP_LEN;
-    q->taper_len = WLANFRAMESYNC_TAPER_LEN;
+    q->M = _config->M;
+    q->cp_len = _config->cp_len;
+    q->stf_period = _config->stf_period;
+    q->ltf_count = _config->ltf_count;
 
     // derived values
     q->M2 = q->M/2;
 
     // subcarrier allocation
     q->p = (unsigned char*) malloc((q->M)*sizeof(unsigned char));
-    wlanframesync_init_sctype(q->M, q->p);
+    memmove(q->p, _config->p, q->M*sizeof(unsigned char));
 
     // validate and count subcarrier allocation
     if (ofdmframe_validate_sctype(q->p, q->M, &q->M_null, &q->M_pilot, &q->M_data))
         return liquid_error_config("wlanframesync_create(), invalid subcarrier allocation");
+
+    // pilot base pattern (one entry per pilot subcarrier, ascending k)
+    q->pilot_base = (float*) malloc((q->M_pilot)*sizeof(float));
+    memmove(q->pilot_base, _config->pilot_base, q->M_pilot*sizeof(float));
 
     // create transform object
     q->X = (float complex*) malloc((q->M)*sizeof(float complex));
@@ -323,13 +380,15 @@ wlanframesync wlanframesync_create(framesync_callback _callback,
     // create input buffer the length of the transform
     q->input_buffer = windowcf_create(q->M + q->cp_len);
 
-    // allocate memory for preamble training sequences (L-STF/L-LTF)
+    // allocate memory for preamble training sequences (STF/LTF)
     q->S0 = (float complex*) malloc((q->M)*sizeof(float complex));
     q->s0 = (float complex*) malloc((q->M)*sizeof(float complex));
     q->S1 = (float complex*) malloc((q->M)*sizeof(float complex));
     q->s1 = (float complex*) malloc((q->M)*sizeof(float complex));
-    wlanframesync_init_LSTF(q->M, q->S0, q->s0, &q->M_S0);
-    wlanframesync_init_LLTF(q->M, q->S1, q->s1, &q->M_S1);
+    if (wlanframesync_load_seq(q->M, _config->stf_seq, q->S0, q->s0, &q->M_S0) != LIQUID_OK)
+        return liquid_error_config("wlanframesync_create(), invalid STF sequence");
+    if (wlanframesync_load_seq(q->M, _config->ltf_seq, q->S1, q->s1, &q->M_S1) != LIQUID_OK)
+        return liquid_error_config("wlanframesync_create(), invalid LTF sequence");
 
     // compute scaling factor
     q->g_data = sqrtf(q->M) / sqrtf(q->M_pilot + q->M_data);
@@ -414,8 +473,9 @@ int wlanframesync_destroy(wlanframesync _q)
     if (_q->debug_pilot_1   != NULL) windowf_destroy(_q->debug_pilot_1);
 #endif
 
-    // free subcarrier type array memory
+    // free subcarrier type array and pilot pattern memory
     free(_q->p);
+    free(_q->pilot_base);
 
     // free transform object
     windowcf_destroy(_q->input_buffer);
@@ -453,7 +513,8 @@ int wlanframesync_print(wlanframesync _q)
     printf(", pilot=%u", _q->M_pilot);
     printf(", data=%u", _q->M_data);
     printf(", cp=%u", _q->cp_len);
-    printf(", taper=%u", _q->taper_len);
+    printf(", stf_period=%u", _q->stf_period);
+    printf(", ltf=%u", _q->ltf_count);
     printf(">\n");
     return LIQUID_OK;
 }
@@ -509,7 +570,7 @@ int wlanframesync_execute(wlanframesync   _q,
             // increase frame length counter
             _q->frame_len ++;
         } else {
-            _q->frame_len = _q->taper_len + _q->M + _q->cp_len; // Reset frame_len to Preamble length 
+            _q->frame_len = _q->M + _q->cp_len; // Reset frame_len to Preamble length
         }
 
         // save input sample to buffer
@@ -662,7 +723,7 @@ int wlanframesync_execute_seekplcp(wlanframesync _q)
     wlanframesync_S0_metrics(_q, _q->G0a, &s_hat);
     s_hat *= g;
 
-    float tau_hat  = cargf(s_hat) * (float)(_q->M/4) / (2*M_PI);
+    float tau_hat  = cargf(s_hat) * (float)(_q->stf_period) / (2*M_PI);
 #if DEBUG_WLANFRAMESYNC_PRINT
     printf(" - gain=%12.3f, rssi=%12.8f, s_hat=%12.4f <%12.8f>, tau_hat=%8.3f\n",
             sqrt(g),
@@ -678,9 +739,9 @@ int wlanframesync_execute_seekplcp(wlanframesync _q)
     if (cabsf(s_hat) > _q->plcp_detect_thresh) {
 
         int dt = (int)roundf(tau_hat);
-        // set timer appropriately (L-STF timing is resolved modulo its
-        // 16-sample period M/4)
-        _q->timer = (_q->M + dt) % (_q->M/4);
+        // set timer appropriately (STF timing is resolved modulo its
+        // time-domain period)
+        _q->timer = (_q->M + dt) % (_q->stf_period);
         _q->timer += _q->M; // add delay to help ensure good S0 estimate
         _q->state = WLANFRAMESYNC_STATE_PLCPSHORT0;
 
@@ -723,7 +784,7 @@ int wlanframesync_execute_S0a(wlanframesync _q)
     _q->s_hat_0 = s_hat;
 
 #if DEBUG_WLANFRAMESYNC_PRINT
-    float tau_hat  = cargf(s_hat) * (float)(_q->M/4) / (2*M_PI);
+    float tau_hat  = cargf(s_hat) * (float)(_q->stf_period) / (2*M_PI);
     printf("********** S0[0] received ************\n");
     printf("    s_hat   :   %12.8f <%12.8f>\n", cabsf(s_hat), cargf(s_hat));
     printf("  tau_hat   :   %12.8f\n", tau_hat);
@@ -770,20 +831,20 @@ int wlanframesync_execute_S0b(wlanframesync _q)
     _q->s_hat_1 = s_hat;
 
 #if DEBUG_WLANFRAMESYNC_PRINT
-    float tau_hat  = cargf(s_hat) * (float)(_q->M/4) / (2*M_PI);
+    float tau_hat  = cargf(s_hat) * (float)(_q->stf_period) / (2*M_PI);
     printf("********** S0[1] received ************\n");
     printf("    s_hat   :   %12.8f <%12.8f>\n", cabsf(s_hat), cargf(s_hat));
     printf("  tau_hat   :   %12.8f\n", tau_hat);
 
     // new timing offset estimate
-    tau_hat  = cargf(_q->s_hat_0 + _q->s_hat_1) * (float)(_q->M/4) / (2*M_PI);
+    tau_hat  = cargf(_q->s_hat_0 + _q->s_hat_1) * (float)(_q->stf_period) / (2*M_PI);
     printf("  tau_hat * :   %12.8f\n", tau_hat);
 
     printf("**********\n");
 #endif
 
     // re-adjust timer accordingly
-    float tau_prime = cargf(_q->s_hat_0 + _q->s_hat_1) * (float)(_q->M/4) / (2*M_PI);
+    float tau_prime = cargf(_q->s_hat_0 + _q->s_hat_1) * (float)(_q->stf_period) / (2*M_PI);
     _q->timer -= (int)roundf(tau_prime);
 
 #if 0
@@ -893,25 +954,32 @@ int wlanframesync_execute_S1(wlanframesync _q)
     //  2. phase should be very near zero (time aligned)
     if (cabsf(g_hat) > _q->plcp_sync_thresh && fabsf(cargf(g_hat)) < 0.1f*M_PI ) {
         //printf("    acquisition\n");
-        // matched a L-LTF long training symbol: store the equalizer gain and
-        // check for the second L-LTF symbol one training symbol (M samples) later
+        // matched a LTF long training symbol: store the equalizer gain
         wlanframesync_finalize_eqgain(_q);
-        _q->state = WLANFRAMESYNC_STATE_PLCPLONG1;
-        // reset timer
-        _q->timer = _q->M;
+        if (_q->ltf_count > 1) {
+            // check for the second LTF symbol one training symbol (M samples) later
+            _q->state = WLANFRAMESYNC_STATE_PLCPLONG1;
+            _q->timer = _q->M;
+        } else {
+            // single LTF symbol: the first payload symbol starts after its
+            // guard interval
+            _q->state = WLANFRAMESYNC_STATE_RXSYMBOLS;
+            _q->timer = _q->M + _q->cp_len + _q->backoff;
+            _q->num_symbols = 0;
+        }
         return LIQUID_OK;
     }
 
-    // check if we are stuck searching for the L-LTF symbol
+    // check if we are stuck searching for the LTF symbol
     if (_q->num_symbols == 32) {
 #if DEBUG_WLANFRAMESYNC_PRINT
-        printf("could not find L-LTF symbol. bailing...\n");
+        printf("could not find LTF symbol. bailing...\n");
 #endif
         wlanframesync_reset(_q);
     }
 
-    // 'reset' timer (wait another L-STF period, keeping the 16-sample timing grid)
-    _q->timer = _q->M/4;
+    // 'reset' timer (wait another STF period, keeping the timing grid)
+    _q->timer = _q->stf_period;
     return LIQUID_OK;
 }
 
@@ -1013,10 +1081,11 @@ int wlanframesync_S0_metrics(wlanframesync   _q,
     float complex s_hat = 0.0f;
 
     // compute timing estimate, accumulate phase difference across
-    // gains on subsequent L-STF tones (every 4th subcarrier is active,
-    // making the time sequence periodic in M/4 = 16 samples)
-    for (i=0; i<_q->M; i+=4) {
-        s_hat += _G[(i+4)%_q->M]*conjf(_G[i]);
+    // gains on subsequent STF tones (every (M/stf_period)-th subcarrier is
+    // active, making the time sequence periodic in stf_period samples)
+    unsigned int d = _q->M / _q->stf_period;
+    for (i=0; i<_q->M; i+=d) {
+        s_hat += _G[(i+d)%_q->M]*conjf(_G[i]);
     }
     s_hat /= _q->M_S0; // normalize output
 
@@ -1263,8 +1332,9 @@ int wlanframesync_rxsymbol(wlanframesync _q)
                 return liquid_error(LIQUID_EINT,"wlanframesync_estimate_eqgain_poly(), pilot subcarrier mismatch");
 
             // IEEE 802.11 pilot value: polarity p_n (symbol index n, starting
-            // at 0 for L-SIG) times the base pattern for this pilot subcarrier
-            pilot = wlan_pilot_polarity[_q->num_symbols % 127] * wlan_pilot_base[n];
+            // at 0 for the first payload symbol) times the configured base
+            // pattern for this pilot subcarrier
+            pilot = wlan_pilot_polarity[_q->num_symbols % 127] * _q->pilot_base[n];
 #if 0
             printf("pilot[%3u] = %12.4e + j*%12.4e (expected %12.4e + j*%12.4e)\n",
                     k,

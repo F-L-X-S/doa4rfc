@@ -470,8 +470,10 @@ using flexframesync_iface = SyncTraits<flexframesync>;
  * @brief SyncTraits specialization for the IEEE802.11n OFDM Frame Synchronizer wlanframesync.
  * Defines the functions (Create, Reset, Execute, Destroy, GetFrameLen, GetFrameSyms) for the IEEE802.11n OFDM Frame Synchronizer.
  *
- * The 802.11n HT-mixed legacy preamble (L-STF/L-LTF, 64-pt FFT at 20 MHz) is fixed
- * by the standard, so no subcarrier allocation parameters are required.
+ * The standard-dependent parameters (FFT size, cyclic prefix length, subcarrier
+ * allocation, training sequences, pilot pattern) are passed in via the
+ * wlanframesync_config_t held by CreateParams_t; preset helpers for the
+ * IEEE 802.11n HT-mixed configuration are provided in wlanframesync.h.
  *
  * @tparam  Synchronizer type
  */
@@ -490,7 +492,7 @@ struct SyncTraits<wlanframesync> {
      *
      */
     struct CreateParams_t {
-
+        wlanframesync_config_t config;   // standard-dependent synchronizer configuration (arrays copied on create)
     };
 
     /**
@@ -518,7 +520,7 @@ struct SyncTraits<wlanframesync> {
      */
     static SynchronizerType Create(const CreateParams_t& params, CallbackWrapper* wrapper)
     {
-        return wlanframesync_create(Callback, wrapper);
+        return wlanframesync_create(&params.config, Callback, wrapper);
     };
 
     /**

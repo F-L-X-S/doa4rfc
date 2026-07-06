@@ -7,8 +7,10 @@
  *
  * The synchronizer is derived from liquid-dsp's ofdmframesync and exposes a
  * C-API wrapped by the SyncTraits<wlanframesync> specialization in synctraits.h.
- * All IEEE 802.11n parameters (FFT size, cyclic prefix length, subcarrier
- * allocation) are fixed by the standard and configured internally.
+ * All standard-dependent parameters (FFT size, cyclic prefix length, subcarrier
+ * allocation, training sequences, pilot pattern) are passed in via
+ * wlanframesync_config_t on create; preset helpers for the IEEE 802.11n
+ * HT-mixed configuration (20 MHz, 64-pt FFT) are provided.
  *
  * Liquid's DSP-modules are based on https://github.com/jgaeddert/liquid-dsp (Copyright (c) 2007 - 2016 Joseph Gaeddert).
  *
@@ -28,14 +30,38 @@ extern "C" {
 #endif
 
 //
-// IEEE 802.11n frame (symbol) synchronizer
+// WLAN OFDM frame (symbol) synchronizer
 //
 typedef struct wlanframesync_s * wlanframesync;
 
-// create IEEE 802.11n framing synchronizer object
+// synchronizer configuration; all fields differ between WLAN standards /
+// channelizations and are copied by wlanframesync_create()
+typedef struct {
+    unsigned int M;                   // FFT size / total number of subcarriers
+    unsigned int cp_len;              // payload-symbol guard interval [samples]
+    unsigned char * p;                // subcarrier allocation (OFDMFRAME_SCTYPE_*), [size: M x 1]
+    liquid_float_complex * stf_seq;   // freq-domain STF, zeros on inactive tones, [size: M x 1]
+    unsigned int stf_period;          // time-domain STF periodicity [samples] (16 for 802.11 @ 20 MHz)
+    liquid_float_complex * ltf_seq;   // freq-domain LTF, zeros on inactive tones, [size: M x 1]
+    unsigned int ltf_count;           // number of repeated LTF training symbols (2 for L-LTF)
+    const float * pilot_base;         // pilot base pattern, ascending k, [size: number of pilots in p x 1]
+} wlanframesync_config_t;
+
+// preset helpers filling caller-provided arrays for a wlanframesync_config_t
+int wlanframesync_init_sctype_80211n_20(unsigned int _M,          // IEEE 802.11n HT-Data 20 MHz allocation (52 data, 4 pilots)
+                                        unsigned char * _p);
+int wlanframesync_init_lstf_80211(unsigned int _M,                // L-STF (IEEE 802.11-2012, Eq. 18-6), stf_period = 16
+                                  liquid_float_complex * _stf_seq);
+int wlanframesync_init_lltf_80211(unsigned int _M,                // L-LTF (IEEE 802.11-2012, Eq. 18-8), ltf_count = 2
+                                  liquid_float_complex * _ltf_seq);
+int wlanframesync_init_pilot_base_80211_20(float * _pilot_base);  // 20 MHz pilot pattern {1,1,1,-1} (IEEE 802.11-2012, Eq. 18-22)
+
+// create WLAN framing synchronizer object
+//  _config     :   standard-dependent synchronizer configuration (copied)
 //  _callback   :   user-defined callback function (framesync_callback signature)
 //  _userdata   :   user-defined data pointer
-wlanframesync wlanframesync_create(framesync_callback _callback,
+wlanframesync wlanframesync_create(const wlanframesync_config_t * _config,
+                                   framesync_callback _callback,
                                    void *             _userdata);
 int wlanframesync_destroy(wlanframesync _q);
 int wlanframesync_print(wlanframesync _q);
