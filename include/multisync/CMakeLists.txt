@@ -7,6 +7,6 @@ target_include_directories(multisync INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Set lib-dependencies (wlanframesync target defined in include/synchronizer;
-# synctraits.h includes its wlanframesync.h)
-target_link_libraries(multisync INTERFACE wlanframesync)
+# Set lib-dependencies (wlanframesync and scframesync targets defined in
+# include/synchronizer; synctraits.h includes their headers)
+target_link_libraries(multisync INTERFACE wlanframesync scframesync)

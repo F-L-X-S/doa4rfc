@@ -593,4 +593,134 @@ struct SyncTraits<wlanframesync> {
 using wlanframesync_iface = SyncTraits<wlanframesync>;
 
 
+// -------------------- Single-Carrier Frame Synchronizer --------------------
+
+// custom single-carrier frame synchronizer (C-implementation in synchronizer/src/scframesync.c)
+#include "scframesync.h"
+
+/**
+ * @brief SyncTraits specialization for the single-carrier frame synchronizer scframesync.
+ * Defines the functions (Create, Reset, Execute, Destroy, GetFrameLen, GetFrameSyms) for the single-carrier frame synchronizer.
+ *
+ * The standard-dependent parameters (preamble symbols, pulse shape, samples
+ * per symbol, detection threshold, carrier offset search range, payload
+ * length) are passed in via the scframesync_config_t held by CreateParams_t;
+ * preset helpers (e.g. GPS L1 C/A, DVB-S2 SOF) are provided in sc_standards.h.
+ *
+ * @tparam  Synchronizer type
+ */
+
+template<>
+struct SyncTraits<scframesync> {
+
+    /**
+     * @brief Define the type of the synchronizer
+     *
+     */
+    using SynchronizerType = scframesync;
+
+    /**
+     * @brief Define the Parameters for the frame synchronizer Create function
+     *
+     */
+    struct CreateParams_t {
+        scframesync_config_t config;   // standard-dependent synchronizer configuration (arrays copied on create)
+    };
+
+    /**
+     * @brief C-compatible callback matching framesync_callback signature.
+     * Extracts CallbackWrapper from userdata and forwards to generic handler.
+     */
+    static int Callback(unsigned char *  _header,
+                        int              _header_valid,
+                        unsigned char *  _payload,
+                        unsigned int     _payload_len,
+                        int              _payload_valid,
+                        framesyncstats_s _stats,
+                        void *           _userdata)
+    {
+        auto* w = static_cast<CallbackWrapper*>(_userdata);
+        return w->handler(w->userdata);
+    };
+
+    /**
+     * @brief Wrapper function to create a frame synchronizer
+     *
+     * @param params Synchronizer parameters
+     * @param wrapper CallbackWrapper containing generic handler and real userdata
+     * @return SynchronizerType Created synchronizer instance
+     */
+    static SynchronizerType Create(const CreateParams_t& params, CallbackWrapper* wrapper)
+    {
+        return scframesync_create(&params.config, Callback, wrapper);
+    };
+
+    /**
+     * @brief Wrapper function to reset a frame synchronizer
+     *
+     * @param fs
+     */
+    static void Reset(SynchronizerType fs)
+    {
+        scframesync_reset(fs);
+    };
+
+    /**
+     * @brief Wrapper function to execute a frame synchronizer
+     *
+     * @param fs Pointer to the synchronizer
+     * @param x Pointer to the input samples array
+     * @param n Number of input samples to read
+     * @return int Result of the execution
+     */
+    static int Execute(SynchronizerType fs, Sample_t* x, unsigned int n)
+    {
+        return scframesync_execute(fs, reinterpret_cast<liquid_float_complex*>(x), n);
+    };
+
+    /**
+     * @brief Wrapper function to destroy a frame synchronizer
+     *
+     * @param fs Pointer to the synchronizer
+     */
+    static void Destroy(SynchronizerType fs)
+    {
+        scframesync_destroy(fs);
+    };
+
+    /**
+     * @brief Wrapper function to get length in samples of the last frame received by the frame synchronizer.
+     *
+     * The function is called within the user defined callback function
+     *
+     * @param fs Pointer to the synchronizer
+     */
+    static unsigned int GetFrameLen(SynchronizerType fs)
+    {
+        return scframesync_get_frame_len(fs);
+    };
+
+    /**
+     * @brief Wrapper function to get symbol of the last frame received by the frame synchronizer.
+     *
+     * The function is called within the user defined callback function
+     *
+     * @param fs Pointer to the synchronizer
+     * @param _x buffer to store the symbol on
+     * @param _pos Index of buffer position to read
+     */
+    static unsigned int GetFrameSym(SynchronizerType fs, Symbol_t* _x, unsigned int _pos)
+    {
+        liquid_float_complex* _x_liquid = liquid_conv::Ptr(_x);
+        return scframesync_get_sym(fs, _x_liquid, _pos);
+    };
+};
+
+/**
+ * @brief Define typename for single-carrier frame synchronizer interface
+ *
+ */
+using scframesync_iface = SyncTraits<scframesync>;
+
+
 #endif // SYNCTRAITS_H

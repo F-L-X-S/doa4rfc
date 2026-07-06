@@ -81,6 +81,8 @@ target_link_libraries(
 set(SIMULATIONS_SRC_FILES
   simulations/music/music_sim.cc
   simulations/wifi/wifi_sim.cc
+  simulations/gps/gps_sim.cc
+  simulations/dvbs2/dvbs2_sim.cc
   simulations/sim_multichannel/sim_multichannel.cc
   simulations/sim_singlechannel/sim_singlechannel.cc
 )
