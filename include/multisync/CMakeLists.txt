@@ -7,13 +7,6 @@ target_include_directories(multisync INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Custom WLAN frame synchronizer with standard-specific preset initializers
-# (C, uses liquid-dsp public API)
-add_library(wlanframesync STATIC
-    src/wlanframesync.c
-    src/wlan_standards.c
-)
-target_include_directories(wlanframesync PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(wlanframesync PUBLIC liquid)
-
+# Set lib-dependencies (wlanframesync target defined in include/synchronizer;
+# synctraits.h includes its wlanframesync.h)
 target_link_libraries(multisync INTERFACE wlanframesync)

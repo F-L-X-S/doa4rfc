@@ -38,6 +38,7 @@ include_directories(${UHD_INCLUDE_DIRS})
 include_directories(include)
 set(PROJECT_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
  
+add_subdirectory(include/synchronizer)
 add_subdirectory(include/multisync)
 add_subdirectory(include/sync_worker)
 add_subdirectory(include/multithread_worker)
