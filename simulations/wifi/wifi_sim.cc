@@ -18,6 +18,7 @@
 
  #include <liquid.h>
  #include <doa4rfc.h>
+ #include <wlan_standards.h>
  #include <sync_worker.h>
  #include <grouping_worker.h>
  #include <multithread_worker.h>

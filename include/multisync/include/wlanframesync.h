@@ -9,8 +9,8 @@
  * C-API wrapped by the SyncTraits<wlanframesync> specialization in synctraits.h.
  * All standard-dependent parameters (FFT size, cyclic prefix length, subcarrier
  * allocation, training sequences, pilot pattern) are passed in via
- * wlanframesync_config_t on create; preset helpers for the IEEE 802.11n
- * HT-mixed configuration (20 MHz, 64-pt FFT) are provided.
+ * wlanframesync_config_t on create; standard-specific preset initializers
+ * are provided in wlan_standards.h.
  *
  * Liquid's DSP-modules are based on https://github.com/jgaeddert/liquid-dsp (Copyright (c) 2007 - 2016 Joseph Gaeddert).
  *
@@ -46,15 +46,6 @@ typedef struct {
     unsigned int ltf_count;           // number of repeated LTF training symbols (2 for L-LTF)
     const float * pilot_base;         // pilot base pattern, ascending k, [size: number of pilots in p x 1]
 } wlanframesync_config_t;
-
-// preset helpers filling caller-provided arrays for a wlanframesync_config_t
-int wlanframesync_init_sctype_80211n_20(unsigned int _M,          // IEEE 802.11n HT-Data 20 MHz allocation (52 data, 4 pilots)
-                                        unsigned char * _p);
-int wlanframesync_init_lstf_80211(unsigned int _M,                // L-STF (IEEE 802.11-2012, Eq. 18-6), stf_period = 16
-                                  liquid_float_complex * _stf_seq);
-int wlanframesync_init_lltf_80211(unsigned int _M,                // L-LTF (IEEE 802.11-2012, Eq. 18-8), ltf_count = 2
-                                  liquid_float_complex * _ltf_seq);
-int wlanframesync_init_pilot_base_80211_20(float * _pilot_base);  // 20 MHz pilot pattern {1,1,1,-1} (IEEE 802.11-2012, Eq. 18-22)
 
 // create WLAN framing synchronizer object
 //  _config     :   standard-dependent synchronizer configuration (copied)
