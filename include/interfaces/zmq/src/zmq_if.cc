@@ -13,8 +13,8 @@
 #include "zmq_if.h"
 #include <cstring>
 
-ZmqSender::ZmqSender(const std::string& endpoint)
-    : context_(1), socket_(context_, zmq::socket_type::push)
+ZmqSender::ZmqSender(const std::string& endpoint, ZmqMsgType type)
+    : context_(1), socket_(context_, zmq::socket_type::push), type_(type)
 {
     socket_.connect(endpoint);  // e.g. "tcp://*:5555"
 }
@@ -50,17 +50,20 @@ void ZmqSender::send(const Samples_2dim_t& data)
  */
 void ZmqSender::send(const Samples_3dim_t& data)
 {
+    const uint32_t msgType = static_cast<uint32_t>(type_);
     const uint32_t numMeasurements = data.size();
     const uint32_t numChannels = data[0].size();
     const uint32_t samplesPerChannel = data[0][0].size();
 
-    // Header: [numMeasurements, numChannels, samplesPerChannel] → 3 × uint32_t
-    std::vector<uint8_t> buffer(sizeof(uint32_t) * 3 + numMeasurements * numChannels * samplesPerChannel * sizeof(Sample_t));
+    // Header: [msgType, numMeasurements, numChannels, samplesPerChannel] → 4 × uint32_t
+    std::vector<uint8_t> buffer(sizeof(uint32_t) * 4 + numMeasurements * numChannels * samplesPerChannel * sizeof(Sample_t));
 
     // Pointer-Offset
     uint8_t* ptr = buffer.data();
 
     // Write Header
+    std::memcpy(ptr, &msgType, sizeof(uint32_t));
+    ptr += sizeof(uint32_t);
     std::memcpy(ptr, &numMeasurements, sizeof(uint32_t));
     ptr += sizeof(uint32_t);
     std::memcpy(ptr, &numChannels, sizeof(uint32_t));
@@ -102,20 +105,21 @@ Samples_3dim_t ZmqReceiver::receive()
         return Samples_3dim_t{}; // No message received
     }
 
-    // Parse Header: 3 × uint32_t [numMeasurements, numChannels, samplesPerChannel]
-    if (message.size() < sizeof(uint32_t) * 3) {
+    // Parse Header: 4 × uint32_t [msgType, numMeasurements, numChannels, samplesPerChannel]
+    if (message.size() < sizeof(uint32_t) * 4) {
         throw std::runtime_error("Invalid ZMQ message: too short for header");
     }
 
     const uint8_t* ptr = static_cast<const uint8_t*>(message.data());
-    uint32_t numMeasurements, numChannels, samplesPerChannel;
+    uint32_t msgType, numMeasurements, numChannels, samplesPerChannel;
 
+    std::memcpy(&msgType, ptr, sizeof(uint32_t));            ptr += sizeof(uint32_t);
     std::memcpy(&numMeasurements, ptr, sizeof(uint32_t));   ptr += sizeof(uint32_t);
     std::memcpy(&numChannels, ptr, sizeof(uint32_t));        ptr += sizeof(uint32_t);
     std::memcpy(&samplesPerChannel, ptr, sizeof(uint32_t));  ptr += sizeof(uint32_t);
 
-    // Validate expected size
-    const size_t expectedSize = sizeof(uint32_t) * 3 +
+    // Validate expected size (msgType is not evaluated: the import path only carries samples)
+    const size_t expectedSize = sizeof(uint32_t) * 4 +
                                numMeasurements * numChannels * samplesPerChannel * sizeof(Sample_t);
     if (message.size() != expectedSize) {
         throw std::runtime_error("Invalid ZMQ message: size mismatch");

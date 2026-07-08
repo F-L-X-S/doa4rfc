@@ -78,7 +78,7 @@ int main(int argc, char*argv[])
     std::signal(SIGINT, &sig_int_handler);
 
     // Run spectral MUSIC DoA algorithm
-    std::string cmd = std::string(PYTHONPATH) + ' ' + std::string(MUSIC_PYFILE)+"&";
+    std::string cmd = "OS_ACTIVITY_MODE=disable " + std::string(PYTHONPATH) + ' ' + std::string(MUSIC_PYFILE)+"&";
     system(cmd.c_str());
 
     // ---------------------- Synchronization Worker ----------------------
@@ -130,6 +130,11 @@ int main(int argc, char*argv[])
     ThreadSafeQueue<Samples_2dim_t> tx_queue;
     ZmqTxWorker zmq_tx_worker(EXPORT_INTERFACE, tx_queue, stop_signal_called);
     grouping_worker.AddMultiChSampsQueue(std::ref(tx_queue));           // Add tx workers input queue as grouping worker output queue
+
+    // |grouping_worker|->multi_ch_frame_syms_queue->|zmq_tx_syms_worker|
+    ThreadSafeQueue<Symbols_2dim_t> tx_syms_queue;
+    ZmqTxWorker zmq_tx_syms_worker(EXPORT_INTERFACE, tx_syms_queue, stop_signal_called, ZmqMsgType::Symbols);
+    grouping_worker.AddMultiChSymsQueue(std::ref(tx_syms_queue));       // Add syms tx workers input queue as grouping worker output queue
 
     // |grouping_worker|->multi_ch_frame_syms_queue->|matlab_worker|
     MatlabXport m_xport(M_FILE);                                        // MatlabXport instance to store results in a .m file                                  
@@ -318,6 +323,7 @@ int main(int argc, char*argv[])
     zmq_tx_external_worker.RunWorker();
     zmq_rx_worker.RunWorker();
     zmq_tx_worker.RunWorker();
+    zmq_tx_syms_worker.RunWorker();
     terminal.RunWorker();
     std::cout << "Started Workers..." << std::endl;
     
@@ -337,6 +343,7 @@ int main(int argc, char*argv[])
     zmq_tx_external_worker.StopWorker();
     zmq_rx_worker.StopWorker();
     zmq_tx_worker.StopWorker();
+    zmq_tx_syms_worker.StopWorker();
     std::cout << "Stopped Workers..." << std::endl;
     return 0;
 }

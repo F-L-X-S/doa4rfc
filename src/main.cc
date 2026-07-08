@@ -87,7 +87,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     std::signal(SIGINT, &sig_int_handler);
 
     // Run spectral MUSIC DoA algorithm
-    std::string cmd = std::string(PYTHONPATH) + ' ' + std::string(MUSIC_PYFILE)+"&";
+    std::string cmd = "OS_ACTIVITY_MODE=disable " + std::string(PYTHONPATH) + ' ' + std::string(MUSIC_PYFILE)+"&";
     system(cmd.c_str());
 
     // ---------------------- Framegeneration ----------------------
@@ -262,6 +262,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     ZmqTxWorker zmq_tx_worker(EXPORT_INTERFACE, tx_queue, stop_signal_called);
     grouping_worker.AddMultiChSampsQueue(std::ref(tx_queue));           // Add tx workers input queue as grouping worker output queue
 
+    // |grouping_worker|->multi_ch_frame_syms_queue->|zmq_tx_syms_worker|
+    ThreadSafeQueue<Symbols_2dim_t> tx_syms_queue;
+    ZmqTxWorker zmq_tx_syms_worker(EXPORT_INTERFACE, tx_syms_queue, stop_signal_called, ZmqMsgType::Symbols);
+    grouping_worker.AddMultiChSymsQueue(std::ref(tx_syms_queue));       // Add syms tx workers input queue as grouping worker output queue
+
     // ---------------------- Configure Terminal worker ----------------------
     TerminalWorker terminal(stop_signal_called);
     terminal.SetPhaseCorrQueue(sync.GetPhaseCorrQueue());
@@ -272,6 +277,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     grouping_worker.RunWorker();
     matlab_worker.RunWorker();
     zmq_tx_worker.RunWorker();
+    zmq_tx_syms_worker.RunWorker();
     terminal.RunWorker();
     std::cout << "Started Receiving..." << std::endl;
 
@@ -284,6 +290,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]) {
     grouping_worker.StopWorker();
     matlab_worker.StopWorker();
     zmq_tx_worker.StopWorker();
+    zmq_tx_syms_worker.StopWorker();
 
     t0.join();
     t1.join();

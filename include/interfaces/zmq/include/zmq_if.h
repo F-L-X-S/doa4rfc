@@ -32,9 +32,18 @@
 
  using namespace sync_worker_queues;
 
+/**
+ * @brief Message type tag transmitted as first header word of every ZMQ message
+ *
+ */
+enum class ZmqMsgType : uint32_t {
+    Samples = 0,    // time-domain IQ samples
+    Symbols = 1     // demodulated constellation symbols
+};
+
 class ZmqSender {
 public:
-    ZmqSender(const std::string& endpoint);
+    ZmqSender(const std::string& endpoint, ZmqMsgType type = ZmqMsgType::Samples);
     void send(const Samples_1dim_t& data);
     void send(const Samples_2dim_t& data);
     void send(const Samples_3dim_t& data);
@@ -42,6 +51,7 @@ public:
 private:
     zmq::context_t context_;
     zmq::socket_t socket_;
+    ZmqMsgType type_;
 };
 
 class ZmqReceiver {
@@ -169,16 +179,18 @@ class ZmqTxWorker: public MultithreadWorker{
     public:
         /**
          * @brief Construct a new Zmq Tx Worker object for a single channel
-         * 
-         * @param endpoint 
-         * @param tx_queue 
+         *
+         * @param endpoint
+         * @param tx_queue
+         * @param type message type tag written to the header of every sent message
          */
-        ZmqTxWorker(        const std::string&              endpoint, 
-                            ThreadSafeQueue<tx_item_t>&     tx_queue, 
-                            std::atomic<bool>&              stop_signal_ref):
+        ZmqTxWorker(        const std::string&              endpoint,
+                            ThreadSafeQueue<tx_item_t>&     tx_queue,
+                            std::atomic<bool>&              stop_signal_ref,
+                            ZmqMsgType                      type = ZmqMsgType::Samples):
             MultithreadWorker(stop_signal_ref),
-            sender_(endpoint),
-            tx_queue_(tx_queue) 
+            sender_(endpoint, type),
+            tx_queue_(tx_queue)
             {
                 AddWorkerQueue<ThreadSafeQueue<tx_item_t>>(&tx_queue_);
             };
@@ -229,9 +241,13 @@ class ZmqTxWorker: public MultithreadWorker{
         ThreadSafeQueue<tx_item_t>& tx_queue_;
 };
 
-// Deduction guide: deduce tx_item_t from tx_queue 
+// Deduction guide: deduce tx_item_t from tx_queue
 template <typename T>
 ZmqTxWorker(const std::string&, ThreadSafeQueue<T>&, std::atomic<bool>&) -> ZmqTxWorker<T>;
+
+// Deduction guide: deduce tx_item_t from tx_queue with explicit message type
+template <typename T>
+ZmqTxWorker(const std::string&, ThreadSafeQueue<T>&, std::atomic<bool>&, ZmqMsgType) -> ZmqTxWorker<T>;
 
 
 
