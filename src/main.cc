@@ -7,7 +7,7 @@
  * 3. Reception of the transmitted signal at 2 receiving channels (RX antennas)
  * 4. Frame detection synchronization for each receiving channel
  * 5. Grouping of the detected frames baseband samples and data symbols across the receiving channels
- * 6. a) Export of the grouped baseband samples to a MUSIC Python-application via ZMQ-socket
+ * 6. a) Export of the grouped baseband samples and data symbols to the DoA Python-application via ZMQ-socket
  *    b) Export of the grouped data symbols to the specified .m file for visualization in MATLAB
  * 
  * Select the signal modulation by defining the preprocessor directive OFDMFRAME or FLEXFRAME. 
