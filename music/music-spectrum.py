@@ -156,8 +156,10 @@ class DoaViewer(QtWidgets.QMainWindow):
 		sample_frames = self.receiver.poll()
 
 		if sample_frames:
-			# stack along n_measurements axis
-			stacked = np.concatenate(sample_frames, axis=0)
+			# stack along n_measurements axis (frame lengths may differ when
+			# streaming continuously, e.g. from GNU Radio — trim to the shortest)
+			min_len = min(f.shape[2] for f in sample_frames)
+			stacked = np.concatenate([f[:, :, :min_len] for f in sample_frames], axis=0)
 
 			# shape : (size, n_arrays, n_rows, n_antennas, subcarriers)
 			self.csi = stacked[:, np.newaxis, np.newaxis, :, :]

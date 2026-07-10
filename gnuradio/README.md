@@ -76,3 +76,7 @@ The block then appears in GRC under the **[doa4rfc]** category as
   exposes one complex input per ULA antenna channel.
 - Start order does not matter (PUSH reconnects), but chunks sent while
   doa4rfc is down are dropped.
+- When using the block from a hand-written Python flowgraph (instead of
+  GRC-generated code), keep a Python reference to the block instance for
+  the lifetime of the flowgraph (e.g. `self.sink = zmq_if_sink(...)`) —
+  otherwise the Python object is garbage-collected and `start()` fails.
