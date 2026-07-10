@@ -5,8 +5,10 @@
  * @brief This simulation demonstrates the use of the doa4rfc framework with samples streamed from GNU Radio.
  * Instead of generating the baseband signal internally (see music_sim.cc), the IMPORT_INTERFACE receives the
  * multi-channel IQ samples from a GNU Radio flowgraph using the zmq_if_sink block (gnuradio/doa4rfc_zmq_if_sink.py).
- * The accompanying flowgraph script simulations/gnuradio/ofdm_doa_tx.py generates OFDM frames for all antennas,
- * phase-shifted according to a DoA of 30 degrees (half-wavelength ULA).
+ * The accompanying flowgraph script simulations/gnuradio/ofdm_doa_tx.py generates OFDM frames for all antennas
+ * using GNU Radio's own OFDM blocks (no liquid-DSP on the TX side), phase-shifted according to a DoA of 30 degrees
+ * (half-wavelength ULA). The frames are detected with the configurable wlanframesync, set up to match the
+ * GNU Radio frame structure (see the Synchronization Worker section below).
  *
  * Usage: start this application first (binds the PULL socket on IMPORT_INTERFACE), then run the flowgraph
  * with GNU Radio's Python interpreter (see simulations/gnuradio/ofdm_doa_tx.py).
@@ -62,13 +64,43 @@ int main(int argc, char*argv[])
     system(cmd.c_str());
 
     // ---------------------- Synchronization Worker ----------------------
-    //Define OFDM-Framesync parameters — must match the framegen settings in ofdm_doa_tx.py
-    constexpr unsigned int M           = 64;    // number of subcarriers
-    constexpr unsigned int cp_len      = 16;    // cyclic prefix length
-    constexpr unsigned int taper_len   = 4;     // window taper length
-    static unsigned char p[M];                  // subcarrier allocation array
-    ofdmframe_init_default_sctype(M, p);        // initialize subcarrier allocation
-    SyncWorker<NUM_CHANNELS, ofdmflexframesync_iface> sync({M, cp_len, taper_len, p}, std::ref(stop_signal_called), 0);
+    // WLAN-framesync configuration matching the GNU Radio OFDM frames generated
+    // by ofdm_doa_tx.py: 802.11a-style carrier layout (48 data carriers, pilots
+    // at +/-7/+/-21), preamble [STF | STF | LTF] with per-symbol cyclic prefix.
+    constexpr unsigned int M          = 64;   // FFT size
+    constexpr unsigned int cp_len     = 16;   // cyclic prefix length
+    constexpr unsigned int stf_period = 16;   // STF time-domain periodicity (every 4th carrier active)
+    constexpr unsigned int ltf_count  = 1;    // single LTF training symbol
+    static unsigned char p[M];                // subcarrier allocation (48 data, 4 pilots)
+    static liquid_float_complex stf_seq[M];   // STF training sequence (freq)
+    static liquid_float_complex ltf_seq[M];   // LTF training sequence (freq)
+    static float pilot_base[4] = {1.0f, 1.0f, 1.0f, -1.0f};  // pilot base pattern, ascending k
+
+    // Subcarrier allocation: all tones k = +/-1..26 active, pilots at +/-7/+/-21
+    for (unsigned int i = 0; i < M; ++i) p[i] = OFDMFRAME_SCTYPE_NULL;
+    for (int k = -26; k <= 26; ++k) {
+        if (k == 0) continue;
+        p[(k + M) % M] = (k == -21 || k == -7 || k == 7 || k == 21) ?
+            OFDMFRAME_SCTYPE_PILOT : OFDMFRAME_SCTYPE_DATA;
+    }
+
+    // Sync-word sign patterns — fixed (numpy RandomState(42)), hardcoded
+    // identically in ofdm_doa_tx.py; keep both in sync
+    static const int   k_stf[12] = {-24,-20,-16,-12, -8, -4,  4,  8, 12, 16, 20, 24};
+    static const float b_stf[12] = {  1, -1,  1,  1,  1, -1,  1,  1,  1, -1,  1,  1};
+    static const float b_ltf[52] = { 1,  1, -1,  1, -1, -1, -1,  1, -1,  1, -1, -1, -1, -1, -1, -1, -1, -1,  1,  1, -1, -1, -1,  1, -1,  1,
+                                     1,  1,  1,  1, -1, -1, -1, -1, -1,  1, -1, -1,  1, -1,  1, -1,  1, -1, -1,  1,  1,  1,  1,  1,  1,  1};
+    for (unsigned int i = 0; i < M; ++i) { stf_seq[i] = {0.0f, 0.0f}; ltf_seq[i] = {0.0f, 0.0f}; }
+    for (unsigned int i = 0; i < 12; ++i)
+        stf_seq[(k_stf[i] + M) % M] = {b_stf[i] * (float)M_SQRT2, 0.0f};
+    for (int k = -26, i = 0; k <= 26; ++k) {
+        if (k == 0) continue;
+        ltf_seq[(k + M) % M] = {b_ltf[i++], 0.0f};
+    }
+
+    SyncWorker<NUM_CHANNELS, wlanframesync_iface> sync(
+        {{M, cp_len, p, stf_seq, stf_period, ltf_seq, ltf_count, pilot_base}},
+        std::ref(stop_signal_called), 0);
 
     // ---------------------- Grouping Worker ----------------------
     GroupingWorker grouping_worker(NUM_CHANNELS, 1e6, std::ref(stop_signal_called));   // max_age of 1ms for grouping
