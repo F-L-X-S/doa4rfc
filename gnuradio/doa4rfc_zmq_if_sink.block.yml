@@ -1,0 +1,37 @@
+id: doa4rfc_zmq_if_sink
+label: zmq_if_sink
+category: '[doa4rfc]'
+
+templates:
+  imports: import doa4rfc_zmq_if_sink
+  make: doa4rfc_zmq_if_sink.zmq_if_sink(${endpoint}, ${num_channels})
+
+parameters:
+- id: endpoint
+  label: TCP Endpoint
+  dtype: string
+  default: "tcp://127.0.0.1:5554"
+- id: num_channels
+  label: Num Channels
+  dtype: int
+  default: 4
+
+inputs:
+- label: in
+  dtype: complex
+  multiplicity: ${ num_channels }
+
+documentation: |-
+  Streams complex IQ samples to the doa4rfc application via a ZeroMQ
+  PUSH socket. Connect one complex stream per ULA antenna channel.
+
+  The endpoint must match the IMPORT_INTERFACE of the running doa4rfc
+  application (default tcp://127.0.0.1:5554), which binds the matching
+  PULL socket. Num Channels must match the application's NUM_CHANNELS.
+
+  Each scheduler chunk is sent as one message:
+  header 4 x uint32 LE [msg_type=0, numMeasurements=1, numChannels,
+  samplesPerChannel], followed by the channel-major complex64 payload.
+  If no receiver is connected, chunks are dropped (non-blocking send).
+
+file_format: 1
