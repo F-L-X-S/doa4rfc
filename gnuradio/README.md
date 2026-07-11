@@ -50,15 +50,22 @@ is not running, chunks are dropped instead of stalling the flowgraph.
    Alternatively set the environment variable `GRC_BLOCKS_PATH` to this
    folder before starting GRC.
 
-3. **Make the Python module importable** when the flowgraph runs — add this
-   folder to `PYTHONPATH` before launching GRC:
+3. **Make the Python module importable** when the flowgraph runs. Permanent
+   (works regardless of how GRC is launched): drop a `.pth` file into the
+   site-packages of GNU Radio's Python —
 
    ```bash
-   export PYTHONPATH="/path/to/doa4rfc/gnuradio:$PYTHONPATH"
-   gnuradio-companion
+   GRPY=$(head -1 $(which gnuradio-companion) | cut -c3-)
+   echo "/path/to/doa4rfc/gnuradio" > \
+     $($GRPY -c "import site; print(site.getsitepackages()[0])")/doa4rfc.pth
    ```
 
-   (Alternatively copy `doa4rfc_zmq_if_sink.py` next to your `.grc` file.)
+   Alternatively per-session: `export PYTHONPATH="/path/to/doa4rfc/gnuradio:$PYTHONPATH"`
+   before launching GRC, or copy `doa4rfc_zmq_if_sink.py` next to your `.grc` file.
+
+   Note: on Homebrew, the `.pth` file and pyzmq live inside the versioned
+   Cellar — repeat steps 1 and 3 after `brew upgrade gnuradio`
+   (`~/.gnuradio/config.conf` survives upgrades).
 
 The block then appears in GRC under the **[doa4rfc]** category as
 `zmq_if_sink`.
