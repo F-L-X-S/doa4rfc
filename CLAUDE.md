@@ -72,3 +72,7 @@ Tests exist in `tests/` (Google Test) but are currently **commented out** in `CM
 ## Code Style
 
 - Never add, remove, or modify whitespace in lines that are not part of the actual code change. Keep diffs minimal and focused.
+
+## Git
+
+- Never stage or commit changes unless explicitly told to. Leave all changes in the working tree.
