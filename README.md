@@ -28,7 +28,166 @@ This project aims to provide a flexible software architecture to implement and t
 - [DoA-Estimation with MUSIC for Single- and Multicarrier Signals](simulations/music/README.md) 
 - [Single-Channel CFR-Estimation](simulations/sim_singlechannel/README.md) 
 - [Multi-Channel CFR-Estimation](simulations/sim_multichannel/README.md)
- 
+
+### Simulation Process Flow
+All protocol simulations share the processing pipeline of the main application, but replace the SDR hardware interface by the ZMQ import socket (`tcp://127.0.0.1:5554`). The multi-channel baseband frames are generated per simulation either internally with Liquid-DSP (`music_sim`), loaded from a MATLAB-generated ULA dataset file (`wifi_sim`, `gps_sim`, `dvbs2_sim`), or streamed live by an external application — a GNU Radio flowgraph using the [zmq_if_sink block](gnuradio/README.md) (`gnuradio_sim`) or any process pushing the [ZMQ wire format](include/interfaces/zmq/README.md). Each worker runs in a separate thread and is decoupled by thread-safe queues; the DoA application runs as a separate Python process.
+```mermaid
+---
+config:
+  look: classic
+  layout: elk
+  theme: redux
+---
+flowchart TD
+ subgraph FrameSources["Frame Generation (one alternative per simulation)"]
+        LiquidGen["Liquid-DSP Frame Generator (OFDM / Flexframe) [music_sim]"]
+        ChannelSim["Multipath Channel Simulation (Differential Delay ≙ DoA, AWGN)"]
+        MatlabGen["MATLAB ULA Dataset Generator (*_dataset_gen.m, offline)"]
+        BinFile["Binary Dataset (records/*.bin)"]
+        LoadDataset["Dataset Loader (cyclic replay) [wifi_sim, gps_sim, dvbs2_sim]"]
+        GrFlowgraph["GNU Radio Flowgraph (gr-digital OFDM blocks, Steering Phases ≙ DoA) [gnuradio_sim]"]
+        ZmqIfSink["zmq_if_sink GRC Block"]
+        PyOther["Any external Application (Python, ...)"]
+  end
+ subgraph T_ZmqTxExtWorker["ZMQ-TX-Worker (simulated external source)"]
+        ZmqTxExt["ZMQ Socket"]
+  end
+ subgraph T_ZmqRxWorker["ZMQ-RX-Worker"]
+        ZmqRx["ZMQ Import + Header Parsing"]
+  end
+ subgraph T_SyncWorker["Sync-Worker"]
+        MultiSync["Multi-Channel Synchronization (ofdmflexframesync | wlanframesync | scframesync)"]
+        PhiErrorCorrection["Phase Offset Correction"]
+  end
+ subgraph T_GroupingWorker["Grouping-Worker"]
+        FindGroups["Time-based Grouping"]
+  end
+ subgraph T_MatlabWorker["MATLAB-Worker"]
+        MatlabExport["MATLAB Export (*_sim.m)"]
+  end
+ subgraph T_ZmqTxSampsWorker["ZMQ-TX-Worker (Samples)"]
+        ZmqSampsSocket["ZMQ Socket (msg-type: Samples)"]
+  end
+ subgraph T_ZmqTxSymsWorker["ZMQ-TX-Worker (Symbols)"]
+        ZmqSymsSocket["ZMQ Socket (msg-type: Symbols)"]
+  end
+ subgraph T_TerminalWorker["Terminal-Worker"]
+        ReadInput["Read Terminal Inputs"]
+        CommandRegistry["Command Registry"]
+  end
+ subgraph PyApp["Python DoA-App (separate process)"]
+        FrameReceiver["ZMQ Import (FrameReceiver)"]
+        Estimator["DoA Estimator (MUSIC, interchangeable)"]
+        FramePlots["Per-Frame Plots (Time, Magnitude, FFT, Constellation)"]
+  end
+    ImportSocket["TCP Socket tcp://127.0.0.1:5554"]
+    ExportSocket["TCP Socket tcp://127.0.0.1:5555"]
+    LiquidGen -- Baseband Frame --> ChannelSim
+    ChannelSim -- Push Multi-Ch Sequence --> TxQueueExt["External TX Queue"]
+    MatlabGen -- Generate offline ---> BinFile
+    BinFile -- Load at Startup --> LoadDataset
+    LoadDataset -- Push Multi-Ch Frames --> TxQueueExt
+    TxQueueExt -- Provide Sequences --> ZmqTxExt
+    ZmqTxExt -- Push Samples --> ImportSocket
+    GrFlowgraph -- IQ Streams [0..N-1] --> ZmqIfSink
+    ZmqIfSink -- Push Samples --> ImportSocket
+    PyOther -- Push Samples --> ImportSocket
+    ImportSocket --> ZmqRx
+    ZmqRx -- Push Timestamped Sample Blocks --> RxSampleQueue["RX Sample Queue [0..N-1]"]
+    RxSampleQueue -- Provide Sample Blocks ---> MultiSync
+    PhiErrorCorrection -- Correct Phase ---> MultiSync
+    MultiSync -- Push Frame Samples ---> FrameSampsQueue["Frame Samples Queue"]
+    MultiSync -- Push Frame Symbols ---> FrameSymsQueue["Frame Symbols Queue"]
+    FrameSampsQueue -- Provide Frame Samples ---> FindGroups
+    FrameSymsQueue -- Provide Frame Symbols ---> FindGroups
+    FindGroups -- Push Multi-Ch Samples ---> MultiChSampsQueue["Multi-Ch Samples Queue"]
+    FindGroups -- Push Multi-Ch Symbols ---> MultiChSymsQueue["Multi-Ch Symbols Queue"]
+    MultiChSampsQueue -- Provide Multi-Ch Samples ---> ZmqSampsSocket & MatlabExport
+    MultiChSymsQueue -- Provide Multi-Ch Symbols ---> ZmqSymsSocket & MatlabExport
+    ZmqSampsSocket -- Push Samples --> ExportSocket
+    ZmqSymsSocket -- Push Symbols --> ExportSocket
+    ExportSocket --> FrameReceiver
+    FrameReceiver -- CSI --> Estimator
+    FrameReceiver -- Latest Frame --> FramePlots
+    ReadInput --> CommandRegistry
+    CommandRegistry -- Push Phase Offset ---> PhiErrorQueue["Phase Offset Queue"]
+    PhiErrorQueue -- Provide Phase Offset ---> PhiErrorCorrection
+    CommandRegistry -- Control Export ---> MatlabExport
+    CommandRegistry -- Triggers ---> Exit["Exit"]
+```
+
+### Simulation Data-flow
+The diagram below shows the data formats along the pipeline: all ZMQ messages carry the wire format `4 x uint32 header [msg_type, n_measurements, n_channels, n_samples]` followed by the `complex64` payload (row-major `[measurement][channel][sample]`). The ZMQ-RX-Worker decomposes each message into per-channel `SampleBlock_t` items with a shared receive-timestamp used by the Grouping-Worker to relate frames across channels. The synchronizer type is selected per simulation via `SyncTraits` (`ofdmflexframesync` — music, `wlanframesync` — wifi/gnuradio, `scframesync` — gps/dvbs2).
+```mermaid
+---
+config:
+  look: classic
+  layout: elk
+  theme: redux
+---
+flowchart TD
+subgraph Sources["Frame Generation"]
+    Liquid["music_sim: Liquid-DSP Framegen + Channel Sim"]
+    Dataset["wifi/gps/dvbs2_sim: MATLAB Dataset (records/*.bin)"]
+    Gnuradio["gnuradio_sim: GNU Radio Flowgraph + zmq_if_sink"]
+end
+
+subgraph ZmqTxExtWorker["ZMQ-TX-Worker (sim-internal)"]
+    ZmqTxExt["ZMQ Export"]
+end
+
+ImportSocket["TCP Socket :5554"]
+
+subgraph ZmqRxWorker["ZMQ-RX-Worker"]
+    ZmqRx["ZMQ Import"]
+end
+
+subgraph SyncWorker["Sync-Worker"]
+    MultiSync["MultiSync"]
+end
+
+subgraph GroupingWorker["Grouping-Worker"]
+    Grouping["Time-based Grouping"]
+end
+
+subgraph ZmqTxSampsWorker["ZMQ-TX-Worker (Samples)"]
+    ZmqExportSamps["ZMQ Export"]
+end
+
+subgraph ZmqTxSymsWorker["ZMQ-TX-Worker (Symbols)"]
+    ZmqExportSyms["ZMQ Export"]
+end
+
+subgraph MatlabWorker["MATLAB-Worker"]
+    MatlabExport["MATLAB Export"]
+end
+
+ExportSocket["TCP Socket :5555"]
+
+subgraph DoAApp["Python DoA-App (music-spectrum.py)"]
+    ZmqImport["ZMQ Import (FrameReceiver)"]
+    MusicAlg["DoA Estimator (MUSIC, interchangeable)"]
+    FramePlots["Per-Frame Plots (Time, Magnitude, FFT, Constellation)"]
+end
+
+Liquid -- "Samples_2dim_t [n_ch][n_samp]" ---> ZmqTxExt
+Dataset -- "Samples_2dim_t (per frame)" ---> ZmqTxExt
+ZmqTxExt -- "header + complex64 (msg-type: Samples)" ---> ImportSocket
+Gnuradio -- "header + complex64 (chunk-wise)" ---> ImportSocket
+ImportSocket ---> ZmqRx
+ZmqRx -- "SampleBlock_t {Samples_1dim_t, timestamp} [0..N-1]" ---> MultiSync
+MultiSync -- "FrameSamps_t" ---> Grouping
+MultiSync -- "FrameSyms_t" ---> Grouping
+Grouping -- "Samples_2dim_t" ---> ZmqExportSamps & MatlabExport
+Grouping -- "Symbols_2dim_t" ---> ZmqExportSyms & MatlabExport
+ZmqExportSamps -- "msg-type: Samples" ---> ExportSocket
+ZmqExportSyms -- "msg-type: Symbols" ---> ExportSocket
+ExportSocket -- "header + complex64 [1..*]" ---> ZmqImport
+ZmqImport -- "CSI (n_meas, 1, 1, n_ch, n_samp)" ---> MusicAlg
+ZmqImport -- "Latest Frame (n_ch, n_samp)" ---> FramePlots
+MatlabExport -- "Samples + Symbols" ---> MFile[("*_sim.m")]
+```
+
 ## Measurements
 [Measurements](measurements/) show the real-world DoA results of the [Application](src/main.cc) using two USRP N210 with WBX daughterboard and provide the corresponding datasets.
 
@@ -71,8 +230,11 @@ end
  subgraph T_MatlabWorker["MATLAB-Worker"]
         MatlabExport["MATLAB Export"]
   end
- subgraph T_ZmqTxWorker["ZMQ-TX-Worker"]
-        ZmqSocket["ZMQ Socket"]
+ subgraph T_ZmqTxSampsWorker["ZMQ-TX-Worker (Samples)"]
+        ZmqSampsSocket["ZMQ Socket (msg-type: Samples)"]
+  end
+ subgraph T_ZmqTxSymsWorker["ZMQ-TX-Worker (Symbols)"]
+        ZmqSymsSocket["ZMQ Socket (msg-type: Symbols)"]
   end
  subgraph T_TerminalWorker["Terminal-Worker"]
         ReadInput["Read Terminal Inputs"]
@@ -93,8 +255,8 @@ end
     FrameSymsQueue -- Provide Frame Symbols ---> FindGroups
     FindGroups -- Push Multi-Ch Samples ---> MultiChSampsQueue["Multi-Ch Samples Queue"]
     FindGroups -- Push Multi-Ch Symbols ---> MultiChSymsQueue["Multi-Ch Symbols Queue"]
-    MultiChSampsQueue -- Provide Multi-Ch Samples ---> ZmqSocket
-    MultiChSampsQueue -- Provide Multi-Ch Samples ---> MatlabExport
+    MultiChSampsQueue -- Provide Multi-Ch Samples ---> ZmqSampsSocket
+    MultiChSymsQueue -- Provide Multi-Ch Symbols ---> ZmqSymsSocket
     MultiChSymsQueue -- Provide Multi-Ch Symbols ---> MatlabExport
     FrameGen -- Write Content ---> TxBuffer
     TxStream -- Transmit Content ---> TxBuffer
@@ -106,7 +268,7 @@ end
 
 ```
 ### Main App Data-flow
-The following diagram illustrates, how samples are streamed from the two SDR-instances, synchronized as sample-blocks with a unique timestamp based on the SDRs device-time and how the frame samples from detected frames are grouped across channels and forwarded to the MUSIC-algorithm.
+The following diagram illustrates, how samples are streamed from the two SDR-instances, synchronized as sample-blocks with a unique timestamp based on the SDRs device-time and how the frame samples and demodulated symbols from detected frames are grouped across channels and forwarded to the Python DoA-application (both message types share one ZMQ socket, distinguished by the msg-type header field).
 ```mermaid
 ---
 config:
@@ -134,15 +296,20 @@ subgraph MatlabWorker["MATLAB-Worker"]
     MatlabExport["MATLAB Export"]
 end
 
-subgraph ZmqTxWorker["ZMQ-TX-Worker"]
-    ZmqExport["ZMQ Export"]
+subgraph ZmqTxSampsWorker["ZMQ-TX-Worker (Samples)"]
+    ZmqExportSamps["ZMQ Export"]
+end
+
+subgraph ZmqTxSymsWorker["ZMQ-TX-Worker (Symbols)"]
+    ZmqExportSyms["ZMQ Export"]
 end
 
 Socket["TCP Socket"]
 
-subgraph DoAAlgorithm["DoA Estimation"]
-    ZmqImport["ZMQ Import"]
-    MusicAlg["MUSIC Algorithm"]
+subgraph DoAAlgorithm["Python DoA-App (music-spectrum.py)"]
+    ZmqImport["ZMQ Import (FrameReceiver)"]
+    MusicAlg["DoA Estimator (MUSIC, interchangeable)"]
+    FramePlots["Per-Frame Plots (Time, Magnitude, FFT, Constellation)"]
 end
 
 Sdr1 -- "Sample-Stream" ---> Rx1
@@ -156,12 +323,14 @@ Rx2 -- "SampleBlock_t" ---> MultiSync
 
 MultiSync -- "FrameSamps_t" ---> Grouping
 MultiSync -- "FrameSyms_t" ---> Grouping
-Grouping -- "Samples_2dim_t" ---> ZmqExport
-Grouping -- "Samples_2dim_t" ---> MatlabExport
+Grouping -- "Samples_2dim_t" ---> ZmqExportSamps
+Grouping -- "Symbols_2dim_t" ---> ZmqExportSyms
 Grouping -- "Symbols_2dim_t" ---> MatlabExport
-ZmqExport -- "Samples_2dim_t" ---> Socket
-Socket -- "Samples_2dim_t [1..*]" ---> ZmqImport
-ZmqImport -- "Samples_2dim_t [1..*]" ---> MusicAlg
+ZmqExportSamps -- "msg-type: Samples" ---> Socket
+ZmqExportSyms -- "msg-type: Symbols" ---> Socket
+Socket -- "4x uint32 header + complex64 [1..*]" ---> ZmqImport
+ZmqImport -- "CSI (n_meas, 1, 1, n_ch, n_samp)" ---> MusicAlg
+ZmqImport -- "Latest Frame (n_ch, n_samp)" ---> FramePlots
 
 ```
 
@@ -203,11 +372,8 @@ Custom commands can be registered at runtime via `TerminalWorker::RegisterComman
 
 Make sure, that all USRPs are connected via separate Ethernet interfaces, since the datarate can possibly cause overflows in the shared-Etehrnet mode. Check the USRP connection by running `uhd_find_devices`. 
 
-#### How to install the doa4rfc Gnuradio-OOT module 
- 1. `cd` to `gr-doa4rfc/build` (create, if not existing) <br>
- 2. Run `cmake -DCMAKE_INSTALL_PREFIX=/opt/homebrew ../` (replace with your grc path, since gnuradio blocks are shared libraries the .dylibs will be placed in /lib of the specified directory)<br>
- 3. Run `make -j && sudo make install`<br>
- 4. Open gnuradio-companion and refresh your blocks. A new doa4rfc section should appear below the core module. 
+#### How to add the doa4rfc GNU Radio block
+The GRC block `zmq_if_sink` (streams IQ samples from a GNU Radio flowgraph to doa4rfc via ZMQ) is a lightweight pure-Python block in [gnuradio/](gnuradio/) — see [gnuradio/README.md](gnuradio/README.md) for the installation steps (block path registration and Python import setup).
 
 ### Main Dependencies
 - [ZMQ](https://zeromq.org/languages/cplusplus/) for socket communication with the Python-implemented DoA Algorithm 
