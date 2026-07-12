@@ -188,6 +188,142 @@ ZmqImport -- "Latest Frame (n_ch, n_samp)" ---> FramePlots
 MatlabExport -- "Samples + Symbols" ---> MFile[("*_sim.m")]
 ```
 
+### Adding a Custom Synchronizer
+The synchronizer type used by the [Sync-Worker](include/sync_worker/include/sync_worker.h) is exchangeable via template traits: [MultiSync](include/multisync/include/multisync.h) never calls a Liquid-DSP synchronizer directly, but only through a `SyncTraits<>` specialization ([synctraits.h](include/multisync/include/synctraits.h)) that maps the six required operations (`Create`, `Reset`, `Execute`, `Destroy`, `GetFrameLen`, `GetFrameSym`) plus the frame-detection callback to the concrete C-API. The C++20 concept `SyncTraitsConcept` verifies at compile time that a specialization provides the complete interface. This is how the custom `wlanframesync` (used by `wifi_sim`/`gnuradio_sim`) and `scframesync` (used by `gps_sim`/`dvbs2_sim`) were added alongside the stock Liquid-DSP synchronizers.
+
+The class- and template-dependencies are shown below: `SyncWorker` owns a `MultiSync` instance, which is generic over the synchronizer interface; the interface is chosen at compile time by passing a `SyncTraits` specialization (its `_iface` alias) as template argument.
+```mermaid
+classDiagram
+    direction LR
+
+    class MultithreadWorker {
+        <<abstract>>
+        +RunWorker()
+        +StopWorker()
+        #Execute()*
+        #AddWorkerQueue(queue)
+    }
+
+    class ThreadSafeQueue~T~ {
+        +push(item)
+        +pop(buffer) bool
+    }
+
+    class SyncWorker~num_channels, synchronizer_iface~ {
+        +SyncWorker(MsCreateParams_t params, atomic_bool stop, int record_padding)
+        +GetRxQueues()
+        +GetPhaseCorrQueue()
+        +AddFrameSampsQueue(queue)
+        +AddFrameSymsQueue(queue)
+        -callback(userdata)$ int
+        -MultiSync ms_
+        -CallbackData_t cb_data_
+    }
+
+    class MultiSync~synchronizer_interface, num_channels~ {
+        +MultiSync(CreateParams_t params, GenericCallback_t handler, userdata_per_channel)
+        +Execute(channel_samples, record_index)
+        +Reset()
+        +SetNcoPhase(channel, phi)
+        +GetFrameLen(channel) unsigned int
+        +GetFrameSyms(channel, syms)
+        +GetMultiChannelFrameSamps() Samples_2dim_t
+        -SynchronizerType framesync_
+        -nco_crcf nco_
+        -CallbackWrapper cb_wrappers_
+    }
+
+    class CallbackWrapper {
+        +GenericCallback_t handler
+        +void* userdata
+    }
+
+    class SyncTraitsConcept {
+        <<concept>>
+    }
+
+    class SyncTraits~SynchronizerType~ {
+        <<template>>
+        +SynchronizerType
+        +CreateParams_t
+        +Callback(args, userdata)$ int
+        +Create(params, wrapper)$ SynchronizerType
+        +Reset(fs)$ void
+        +Execute(fs, x, n)$ int
+        +Destroy(fs)$ void
+        +GetFrameLen(fs)$ unsigned int
+        +GetFrameSym(fs, y, pos)$ unsigned int
+    }
+
+    class ofdmframesync_iface
+    class ofdmflexframesync_iface
+    class flexframesync_iface
+    class wlanframesync_iface
+    class scframesync_iface
+
+    class LiquidDsp["Liquid-DSP C-API"]
+    class CustomSync["Custom C synchronizers in include/synchronizer"]
+
+    MultithreadWorker <|-- SyncWorker : inherits
+    MultithreadWorker o-- ThreadSafeQueue : registered worker queues
+    SyncWorker "1" *-- "1" MultiSync : ms_
+    SyncWorker ..> SyncTraits : synchronizer_iface template argument
+    MultiSync "1" *-- "num_channels" CallbackWrapper : cb_wrappers_
+    MultiSync ..> SyncTraitsConcept : template parameter constrained by
+    SyncTraitsConcept ..> SyncTraits : verifies static interface of
+    SyncTraits <|.. ofdmframesync_iface : specialization
+    SyncTraits <|.. ofdmflexframesync_iface : specialization
+    SyncTraits <|.. flexframesync_iface : specialization
+    SyncTraits <|.. wlanframesync_iface : specialization
+    SyncTraits <|.. scframesync_iface : specialization
+    ofdmframesync_iface ..> LiquidDsp : wraps
+    ofdmflexframesync_iface ..> LiquidDsp : wraps
+    flexframesync_iface ..> LiquidDsp : wraps
+    wlanframesync_iface ..> CustomSync : wraps
+    scframesync_iface ..> CustomSync : wraps
+```
+
+To add your own synchronizer:
+
+1. **Provide the synchronizer implementation** with a Liquid-DSP-style C interface (`<name>_create`, `_reset`, `_execute`, `_destroy`, `_get_frame_len`, `_get_sym` and a `framesync_callback`-style callback), e.g. as a C-file in [include/synchronizer/](include/synchronizer/) like [wlanframesync.c](include/synchronizer/src/wlanframesync.c). Any existing Liquid-DSP synchronizer works as-is.
+
+2. **Specialize `SyncTraits<>`** for the new type in [synctraits.h](include/multisync/include/synctraits.h):
+   ```cpp
+   template<>
+   struct SyncTraits<myframesync> {
+       using SynchronizerType = myframesync;
+       struct CreateParams_t { myframesync_config_t config; };  // everything Create() needs
+
+       // C-callback matching the synchronizer's callback signature:
+       // unwrap the CallbackWrapper and forward to the generic handler
+       static int Callback(/* synchronizer-specific args */, void* _userdata) {
+           auto* w = static_cast<CallbackWrapper*>(_userdata);
+           return w->handler(w->userdata);
+       };
+
+       static SynchronizerType Create(const CreateParams_t& p, CallbackWrapper* w)
+           { return myframesync_create(&p.config, Callback, w); };
+       static void Reset(SynchronizerType fs)   { myframesync_reset(fs); };
+       static int Execute(SynchronizerType fs, Sample_t* x, unsigned int n)
+           { return myframesync_execute(fs, reinterpret_cast<liquid_float_complex*>(x), n); };
+       static void Destroy(SynchronizerType fs) { myframesync_destroy(fs); };
+       static unsigned int GetFrameLen(SynchronizerType fs)
+           { return myframesync_get_frame_len(fs); };
+       static unsigned int GetFrameSym(SynchronizerType fs, Symbol_t* x, unsigned int pos)
+           { return myframesync_get_sym(fs, liquid_conv::Ptr(x), pos); };
+   };
+   using myframesync_iface = SyncTraits<myframesync>;
+   ```
+   The `Callback` returns the handler's value to the synchronizer — return `1` there to reset the synchronizer after a frame (see `SyncWorker::callback`).
+
+3. **Instantiate the Sync-Worker** with the new interface as template argument; the `CreateParams_t` are passed through to `Create()` for every channel (one synchronizer + NCO instance per channel is created inside `MultiSync`):
+   ```cpp
+   SyncWorker<NUM_CHANNELS, myframesync_iface> sync(
+       {{/* CreateParams_t, e.g. myframesync_config_t */}},
+       std::ref(stop_signal_called), 0 /* record padding [samples] */);
+   ```
+   See [gnuradio_sim.cc](simulations/gnuradio/gnuradio_sim.cc) for a complete example that configures `wlanframesync_iface` (subcarrier allocation, STF/LTF sequences, pilot pattern) to detect frames generated by GNU Radio. If the specialization misses a function or a signature differs, `SyncTraitsConcept` rejects the instantiation with a compile-time error.
+
 ## Measurements
 [Measurements](measurements/) show the real-world DoA results of the [Application](src/main.cc) using two USRP N210 with WBX daughterboard and provide the corresponding datasets.
 
