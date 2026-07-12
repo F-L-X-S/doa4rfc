@@ -11,7 +11,7 @@ This project aims to provide a flexible software architecture to implement and t
 -  [MultiSync](include/multisync/README.md) for simultaneous processing and phase offset correction with multiple generic frame synchronizers based on [Liquid-DSP](https://liquidsdr.org)
 
 ### Multithread Architecture 
-- [Sync-Worker](include/sync_worker/include/sync_worker.h): Multichannel frame detection and synchronization
+- [Sync-Worker](include/sync_worker/README.md): Multichannel frame detection and synchronization
 - [Grouping-Worker](include/grouping_worker/include/grouping_worker.h): Identification of frames related across channels
 - [UI-Worker](include/ui_worker/include/ui_worker.h): Provision of terminal interface 
 
