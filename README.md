@@ -25,10 +25,13 @@ This project aims to provide a flexible software architecture to implement and t
 
 ## Simulations
  [Simulations](simulations/) provided in ./simulations demonstrate the usage of the provided modules, illustrate the underlying mathematical concepts and show the simulation results:
-- [DoA-Estimation with MUSIC for Single- and Multicarrier Signals](simulations/music/README.md) 
+- [Genereic Singlecarrier and OFDM Signal DoA Estimation](simulations/music/README.md) 
+- [IEEE 802.11n WiFi DoA Estimation](simulations/wifi/wifi_sim.cc)
+- [GPS L1 C/A DoA Estimation](simulations/gps/gps_sim.cc)
+- [DVB-S2 DoA Estimation](simulations/dvbs2/dvbs2_sim.cc)
+- [GNU Radio Live DoA Estimation](simulations/gnuradio/gnuradio_sim.cc)
 - [Single-Channel CFR-Estimation](simulations/sim_singlechannel/README.md) 
 - [Multi-Channel CFR-Estimation](simulations/sim_multichannel/README.md)
-
 ### Simulation Process Flow
 All protocol simulations share the processing pipeline of the main application, but replace the SDR hardware interface by the ZMQ import socket (`tcp://127.0.0.1:5554`). The multi-channel baseband frames are generated per simulation either internally with Liquid-DSP (`music_sim`), loaded from a MATLAB-generated ULA dataset file (`wifi_sim`, `gps_sim`, `dvbs2_sim`), or streamed live by an external application — a GNU Radio flowgraph using the [zmq_if_sink block](gnuradio/README.md) (`gnuradio_sim`) or any process pushing the [ZMQ wire format](include/interfaces/zmq/README.md). Each worker runs in a separate thread and is decoupled by thread-safe queues; the DoA application runs as a separate Python process.
 ```mermaid
